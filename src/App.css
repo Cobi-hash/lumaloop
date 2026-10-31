@@ -577,7 +577,8 @@
   .film-caption strong { font-size: 17px; }
   .entry-footer { flex-direction: column; }
   .entry-footer span:last-child { text-align: left; }
-  .room-context { max-width: 112px; overflow: hidden; white-space: nowrap; }
+  .room-context { max-width: none; overflow: visible; white-space: nowrap; }
+  .room-context-label { display: none; }
   .room-context .context-divider { display: none; }
   .room-code-button span { font-size: 12px; }
   .room-workspace { width: calc(100% - 22px); }
@@ -591,3 +592,64 @@
   .room-bottomline { flex-direction: column; gap: 8px; }
   .room-bottomline span:last-child { text-align: left; }
 }
+
+.entry-shell .topbar-note,
+.room-shell .room-context,
+.entry-shell .field-label,
+.entry-shell .panel-heading p,
+.entry-shell .text-input,
+.entry-shell .primary-button,
+.entry-shell .secondary-button,
+.entry-shell .privacy-note,
+.entry-shell .entry-footer,
+.entry-shell .form-divider,
+.room-shell .mode-tabs button,
+.room-shell .connection-pill,
+.room-shell .screen-empty > p:not(.eyebrow),
+.room-shell .player-error,
+.room-shell .playback-status,
+.room-shell .local-audio,
+.room-shell .source-row input,
+.room-shell .source-row button,
+.room-shell .guest-status,
+.room-shell .screen-stage-footer,
+.room-shell .screen-setting select,
+.room-shell .screen-audio-toggle,
+.room-shell .share-button,
+.room-shell .stop-share,
+.room-shell .screen-limit-note,
+.room-shell .inline-error,
+.room-shell .inline-notice,
+.room-shell .person-copy strong,
+.room-shell .invite-block-head strong {
+  font-size: 14px;
+}
+
+.entry-shell .eyebrow,
+.room-shell .watch-heading .eyebrow,
+.room-shell .people-heading .eyebrow,
+.room-shell .screen-empty .eyebrow,
+.entry-shell .film-caption span,
+.entry-shell .film-index,
+.room-shell .source-label,
+.room-shell .mini-label,
+.room-shell .timecode,
+.room-shell .screen-setting > span,
+.room-shell .screen-settings-note,
+.room-shell .person-copy > span,
+.room-shell .invite-block-head div span,
+.room-shell .invite-footnote,
+.room-shell .role-note,
+.room-shell .connection-note,
+.room-shell .room-bottomline {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.room-shell .room-context strong { font-size: 14px; }
+.room-shell .person-actions select { max-width: 112px; min-height: 32px; font-size: 13px; }
+.room-shell .avatar { font-size: 12px; }
+.room-shell .you-tag { font-size: 10px; }
+.room-shell .cohost-tag { font-size: 11px; }
+.room-shell .room-code-button span { font-size: 14px; }
+.room-shell .screen-settings-strip { row-gap: 13px; }

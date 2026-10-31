@@ -636,7 +636,7 @@ function App() {
     <main className="room-shell">
       <header className="topbar room-topbar">
         <a className="brand" href="/" onClick={(event) => { event.preventDefault(); leaveRoom() }} aria-label="Leave room and go home"><span className="brand-mark"><Film size={19} strokeWidth={2.2} /></span><span>LumaLoop</span></a>
-        <div className="room-context"><span className="room-live-dot" /> PRIVATE ROOM <span className="context-divider">/</span> <strong>{room.code}</strong></div>
+        <div className="room-context"><span className="room-live-dot" /><span className="room-context-label">PRIVATE ROOM</span><span className="context-divider">/</span><strong>{room.code}</strong></div>
         <div className="topbar-actions"><button className="invite-button" type="button" onClick={() => void copyInvite()}>{copied ? <Check size={16} /> : <Copy size={16} />}<span>{copied ? 'Copied' : 'Invite'}</span></button><button className="icon-button leave-button" type="button" title="Leave room" aria-label="Leave room" onClick={leaveRoom}><LogOut size={17} /></button></div>
       </header>
       <div className="room-workspace">
