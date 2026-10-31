@@ -12,6 +12,8 @@ import {
   Link2,
   LoaderCircle,
   LogOut,
+  Maximize2,
+  Minimize2,
   Mic2,
   MonitorPlay,
   Play,
@@ -153,11 +155,14 @@ function App() {
   const [screenTrack, setScreenTrack] = useState<LiveKitTrackType | null>(null)
   const [screenAudioTrack, setScreenAudioTrack] = useState<LiveKitTrackType | null>(null)
   const [copied, setCopied] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const socketRef = useRef<Socket | null>(null)
   const sessionRef = useRef<Session | null>(null)
   const roomRef = useRef<RoomState | null>(null)
   const syncingSeekRef = useRef(false)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const mediaFrameRef = useRef<HTMLDivElement>(null)
+  const screenStageRef = useRef<HTMLDivElement>(null)
   const screenVideoRef = useRef<HTMLVideoElement>(null)
   const screenAudioRef = useRef<HTMLAudioElement>(null)
   const liveKitRef = useRef<LiveKitRoomType | null>(null)
@@ -174,6 +179,12 @@ function App() {
   useEffect(() => {
     roomRef.current = room
   }, [room])
+
+  useEffect(() => {
+    const updateFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', updateFullscreen)
+    return () => document.removeEventListener('fullscreenchange', updateFullscreen)
+  }, [])
 
   useEffect(() => {
     if (!playbackSource || playbackTime === undefined || playbackIsPlaying === undefined || playbackUpdatedAt === undefined) return
@@ -343,6 +354,16 @@ function App() {
     }).then((result) => {
       if (!result.ok) setError(result.error ?? 'Playback could not be synchronized.')
     }).catch((issue) => setError(issue instanceof Error ? issue.message : 'Playback could not be synchronized.'))
+  }
+
+  async function toggleFullscreen(target: HTMLElement | null) {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else if (target?.requestFullscreen) await target.requestFullscreen()
+      else setError('Fullscreen is not supported by this browser.')
+    } catch {
+      setError('The browser could not enter fullscreen. Check its site permissions and try again.')
+    }
   }
 
   async function copyInvite() {
@@ -605,20 +626,33 @@ function App() {
           </nav>
           {mode === 'video' ? (
             <>
-              <div className="media-frame">
+              <div className="media-frame" ref={mediaFrameRef}>
                 {playbackState.sourceUrl ? <video ref={videoRef} className="video-player" playsInline muted={muted} controls={canControl} onPlay={() => { if (canControl && !playbackState.isPlaying) playback('play') }} onPause={() => { if (canControl && playbackState.isPlaying) playback('pause') }} onSeeked={() => { if (syncingSeekRef.current) { syncingSeekRef.current = false; return } if (canControl) playback('seek') }} onLoadedMetadata={() => { const current = roomRef.current?.playback; if (current && videoRef.current) videoRef.current.currentTime = current.currentTime }} onError={() => setMediaError('This video could not be loaded. The link may be private, blocked by CORS, or require provider access.')} /> : <div className="empty-player"><div className="reel-icon"><Film size={31} /></div><p className="eyebrow">THE SCREEN IS YOURS</p><h2>Pick the first feature.</h2><p>Paste a direct MP4, WebM, or M3U8 link to begin.</p></div>}
                 {visibleMediaError && playbackState.sourceUrl && <div className="player-error" role="alert"><CircleHelp size={20} /><span>{visibleMediaError}</span></div>}
                 <div className="player-corner-mark"><span className="brand-mark"><Film size={14} /></span> LUMALOOP</div>
               </div>
-              <div className="playback-meta"><div className="playback-status"><span className={playbackState.isPlaying ? 'playing-pulse' : 'paused-mark'} />{playbackState.isPlaying ? 'Playing in sync' : 'Paused'}<span className="timecode">{readableTime(elapsed)}</span></div><button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button></div>
+              <div className="playback-meta">
+                <div className="playback-status"><span className={playbackState.isPlaying ? 'playing-pulse' : 'paused-mark'} />{playbackState.isPlaying ? 'Playing in sync' : 'Paused'}<span className="timecode">{readableTime(elapsed)}</span></div>
+                <div className="media-local-actions">
+                  <button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button>
+                  <button className="icon-button media-fullscreen-button" type="button" disabled={!playbackState.sourceUrl} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => void toggleFullscreen(mediaFrameRef.current)}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+                </div>
+              </div>
               {canControl && <form className="source-form" onSubmit={(event) => { event.preventDefault(); playback('load', 0, mediaUrl.trim()) }}><div className="source-label"><span className="mini-label">VIDEO SOURCE</span><span>Direct links only</span></div><div className="source-row"><input aria-label="Video URL" value={mediaUrl} onChange={(event) => setMediaUrl(event.target.value)} placeholder="Paste an MP4, WebM or HLS link"/><button type="submit" disabled={!mediaUrl.trim()}><Play size={15} /> Load video</button></div></form>}
               {!canControl && playbackState.sourceUrl && <div className="guest-status"><ShieldCheck size={15} /> Playback is directed by {room.participants.find((participant) => participant.role === 'host')?.displayName ?? 'the host'}.</div>}
             </>
           ) : (
             <>
-            <div className="screen-stage">
+            <div className="screen-stage" ref={screenStageRef}>
               {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
-              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenActive && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>
+              <div className="screen-stage-footer">
+                <span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>
+                <div className="screen-footer-actions">
+                  <button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} aria-label={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button>
+                  <button className="icon-button media-fullscreen-button" type="button" disabled={!screenTrack} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => void toggleFullscreen(screenStageRef.current)}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+                  {screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenActive && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}
+                </div>
+              </div>
               {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
               {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
             </div>

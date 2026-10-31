@@ -391,6 +391,10 @@
 
 .media-frame,
 .screen-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid #333b33; border-radius: 3px; background: #090b09; }
+.media-frame:fullscreen,
+.screen-stage:fullscreen { width: 100vw; height: 100vh; max-height: 100vh; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; background: #050605; }
+.media-frame:fullscreen .video-player,
+.screen-stage:fullscreen .screen-video { width: 100%; height: 100%; }
 .video-player,
 .screen-video { display: block; width: 100%; height: 100%; object-fit: contain; background: #080a08; }
 .empty-player,
@@ -409,6 +413,11 @@
 .player-error svg { flex: 0 0 auto; color: var(--coral); }
 
 .playback-meta { display: flex; align-items: center; justify-content: space-between; min-height: 48px; border-bottom: 1px solid #313931; }
+.media-local-actions,
+.screen-footer-actions { display: flex; align-items: center; gap: 9px; }
+.screen-footer-actions { flex-wrap: wrap; justify-content: flex-end; }
+.media-fullscreen-button { width: 32px; height: 32px; flex: 0 0 32px; }
+.media-fullscreen-button:disabled { opacity: .45; cursor: not-allowed; }
 .playback-status,
 .local-audio { display: inline-flex; align-items: center; gap: 9px; color: #bdc5b9; font-size: 10px; }
 .playing-pulse,
@@ -434,7 +443,7 @@
 .screen-empty { flex: 1; height: auto; min-height: 0; }
 .screen-empty .secondary-button { margin-top: 17px; }
 .screen-share-cta { margin-top: 17px; min-height: 38px; padding: 0 15px; }
-.screen-stage-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 15px; color: #aab4a7; border-top: 1px solid #333b33; background: #171c18; font-size: 10px; }
+.screen-stage-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 8px 15px; color: #aab4a7; border-top: 1px solid #333b33; background: #171c18; font-size: 10px; }
 .screen-stage-footer > span { display: inline-flex; align-items: center; gap: 9px; }
 .screen-settings-strip { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, .8fr) auto; align-items: end; gap: 12px; margin-top: -1px; padding: 12px 14px; border: 1px solid #333b33; border-radius: 0 0 3px 3px; background: #1b201c; }
 .screen-setting { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
@@ -541,6 +550,8 @@
   .mode-tabs button { padding: 0 11px; }
   .media-frame { aspect-ratio: 16 / 10; }
   .screen-stage { min-height: 310px; }
+  .screen-stage-footer { flex-wrap: wrap; }
+  .screen-footer-actions { flex: 1 1 100%; justify-content: flex-start; }
   .screen-settings-strip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 11px; }
   .screen-audio-toggle { grid-column: 1 / -1; }
   .people-panel { order: 2; }
