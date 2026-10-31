@@ -277,9 +277,13 @@ function App() {
   useEffect(() => {
     const audio = screenAudioRef.current
     if (!audio || !screenAudioTrack) return
+    // Apply the local mute before and after attaching the remote track.
+    // Keep the host's local playback muted independently of the shared source.
+    audio.muted = screenAudioMuted
     screenAudioTrack.attach(audio)
+    audio.muted = screenAudioMuted
     return () => { screenAudioTrack.detach(audio) }
-  }, [screenAudioTrack])
+  }, [screenAudioTrack, screenAudioMuted])
 
   useEffect(() => () => {
     if (mediaControlsTimerRef.current !== null) window.clearTimeout(mediaControlsTimerRef.current)
