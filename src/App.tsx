@@ -1,0 +1,552 @@
+import { useEffect, useRef, useState } from 'react'
+import type { Room as LiveKitRoomType, Track as LiveKitTrackType } from 'livekit-client'
+import {
+  ArrowUpRight,
+  Check,
+  ChevronDown,
+  CircleHelp,
+  Clapperboard,
+  Copy,
+  Crown,
+  Film,
+  Link2,
+  LoaderCircle,
+  LogOut,
+  Mic2,
+  MonitorPlay,
+  Play,
+  Plus,
+  ScreenShare,
+  ShieldCheck,
+  Users,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react'
+import { io, type Socket } from 'socket.io-client'
+import './App.css'
+
+type Role = 'host' | 'cohost' | 'guest'
+type Mode = 'video' | 'screen'
+
+interface Participant {
+  id: string
+  displayName: string
+  role: Role
+  joinedAt: number
+  connected: boolean
+}
+
+interface RoomState {
+  code: string
+  createdAt: number
+  participants: Participant[]
+  playback: {
+    sourceUrl: string
+    currentTime: number
+    isPlaying: boolean
+    updatedAt: number
+  }
+}
+
+interface AckResponse<T = unknown> {
+  ok: boolean
+  error?: string
+  room?: T
+  participant?: Participant
+  reconnected?: boolean
+  authToken?: string
+}
+
+interface Session {
+  code: string
+  participantId: string
+  displayName: string
+  authToken: string
+}
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+const NAME_KEY = 'lumaloop.displayName'
+const PARTICIPANT_KEY = 'lumaloop.participantId'
+const AUTH_TOKEN_KEY = 'lumaloop.participantCredential'
+
+function participantId() {
+  const saved = localStorage.getItem(PARTICIPANT_KEY)
+  if (saved) return saved
+  const created = crypto.randomUUID()
+  localStorage.setItem(PARTICIPANT_KEY, created)
+  return created
+}
+
+function participantCredential() {
+  const saved = localStorage.getItem(AUTH_TOKEN_KEY)
+  if (saved) return saved
+  const created = crypto.randomUUID()
+  localStorage.setItem(AUTH_TOKEN_KEY, created)
+  return created
+}
+
+function emitAck<T>(socket: Socket, event: string, payload: unknown) {
+  return new Promise<T>((resolve, reject) => {
+    socket.timeout(7_000).emit(event, payload, (error: Error | null, response: T) => {
+      if (error) reject(new Error('The server did not respond. Check your connection and try again.'))
+      else resolve(response)
+    })
+  })
+}
+
+function readableTime(seconds: number) {
+  if (!Number.isFinite(seconds)) return '00:00'
+  const value = Math.max(0, Math.floor(seconds))
+  return `${Math.floor(value / 60).toString().padStart(2, '0')}:${(value % 60).toString().padStart(2, '0')}`
+}
+
+function App() {
+  const [displayName, setDisplayName] = useState(() => localStorage.getItem(NAME_KEY) ?? '')
+  const [roomCode, setRoomCode] = useState(() => new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '')
+  const [room, setRoom] = useState<RoomState | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
+  const [socketConnected, setSocketConnected] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [mode, setMode] = useState<Mode>('video')
+  const [muted, setMuted] = useState(() => localStorage.getItem('lumaloop.muted') !== 'false')
+  const [mediaUrl, setMediaUrl] = useState('')
+  const [mediaError, setMediaError] = useState('')
+  const [screenError, setScreenError] = useState('')
+  const [screenConnected, setScreenConnected] = useState(false)
+  const [screenSharing, setScreenSharing] = useState(false)
+  const [screenActive, setScreenActive] = useState(false)
+  const [screenTrack, setScreenTrack] = useState<LiveKitTrackType | null>(null)
+  const [screenAudioTrack, setScreenAudioTrack] = useState<LiveKitTrackType | null>(null)
+  const [copied, setCopied] = useState(false)
+  const socketRef = useRef<Socket | null>(null)
+  const sessionRef = useRef<Session | null>(null)
+  const roomRef = useRef<RoomState | null>(null)
+  const syncingSeekRef = useRef(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const screenVideoRef = useRef<HTMLVideoElement>(null)
+  const screenAudioRef = useRef<HTMLAudioElement>(null)
+  const liveKitRef = useRef<LiveKitRoomType | null>(null)
+
+  const self = room?.participants.find((participant) => participant.id === session?.participantId)
+  const canControl = self?.role === 'host' || self?.role === 'cohost'
+  const isHost = self?.role === 'host'
+  const playbackSource = room?.playback.sourceUrl
+  const playbackTime = room?.playback.currentTime
+  const playbackIsPlaying = room?.playback.isPlaying
+  const playbackUpdatedAt = room?.playback.updatedAt
+
+  useEffect(() => {
+    roomRef.current = room
+  }, [room])
+
+  useEffect(() => {
+    if (!playbackSource || playbackTime === undefined || playbackIsPlaying === undefined || playbackUpdatedAt === undefined) return
+    const video = videoRef.current
+    if (!video) return
+    const sync = () => {
+      if (!video.readyState) return
+      const target = playbackTime + (playbackIsPlaying ? Math.max(0, Date.now() - playbackUpdatedAt) / 1000 : 0)
+      if (Math.abs(video.currentTime - target) > 1.25) {
+        syncingSeekRef.current = true
+        try {
+          video.currentTime = target
+          window.setTimeout(() => { syncingSeekRef.current = false }, 1_500)
+        } catch {
+          syncingSeekRef.current = false
+        }
+      }
+      if (playbackIsPlaying && video.paused) void video.play().catch(() => setMediaError('Playback was blocked by the browser. Press play on your device to continue.'))
+      if (!playbackIsPlaying && !video.paused) video.pause()
+    }
+    sync()
+    const timer = window.setInterval(sync, 1_500)
+    return () => window.clearInterval(timer)
+  }, [playbackSource, playbackTime, playbackIsPlaying, playbackUpdatedAt])
+
+  useEffect(() => {
+    const video = videoRef.current
+    const source = playbackSource
+    if (!video || !source) return
+    const pathname = new URL(source).pathname.toLowerCase()
+    const isHls = pathname.endsWith('.m3u8')
+    const isVideo = /\.(mp4|webm)$/.test(pathname)
+    if (!isHls && !isVideo) {
+      video.removeAttribute('src')
+      video.load()
+      return
+    }
+    if (isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
+      let disposed = false
+      let hls: import('hls.js').default | undefined
+      void import('hls.js').then(({ default: Hls }) => {
+        if (disposed) return
+        if (!Hls.isSupported()) {
+          setMediaError('This browser does not support HLS playback.')
+          return
+        }
+        hls = new Hls({ enableWorker: true, lowLatencyMode: false })
+        hls.loadSource(source)
+        hls.attachMedia(video)
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) setMediaError('This HLS stream could not be loaded. Check that it is public, uses HTTPS, and allows playback from this site.')
+        })
+      })
+      return () => { disposed = true; hls?.destroy() }
+    }
+    video.src = source
+    video.load()
+    return () => video.removeAttribute('src')
+  }, [playbackSource])
+
+  useEffect(() => {
+    const video = screenVideoRef.current
+    if (!video || !screenTrack) return
+    screenTrack.attach(video)
+    return () => { screenTrack.detach(video) }
+  }, [screenTrack])
+
+  useEffect(() => {
+    const audio = screenAudioRef.current
+    if (!audio || !screenAudioTrack) return
+    screenAudioTrack.attach(audio)
+    return () => { screenAudioTrack.detach(audio) }
+  }, [screenAudioTrack])
+
+  useEffect(() => () => {
+    liveKitRef.current?.disconnect()
+    socketRef.current?.disconnect()
+  }, [])
+
+  async function connectToRoom(action: 'room:create' | 'room:join') {
+    setError('')
+    setNotice('')
+    const name = displayName.trim()
+    if (!name) {
+      setError('Add a display name to start your movie night.')
+      return
+    }
+    if (action === 'room:join' && !roomCode.trim()) {
+      setError('Enter the room code from your invitation.')
+      return
+    }
+    setBusy(true)
+    localStorage.setItem(NAME_KEY, name)
+    const id = participantId()
+    const authToken = participantCredential()
+    let activeSocket = socketRef.current
+    if (!activeSocket) {
+      activeSocket = io(API_URL, { autoConnect: false, transports: ['websocket', 'polling'] })
+      socketRef.current = activeSocket
+      activeSocket.on('connect', () => {
+        setSocketConnected(true)
+        const currentSession = sessionRef.current
+        if (currentSession) {
+          void emitAck<AckResponse<RoomState>>(activeSocket!, 'room:join', {
+            code: currentSession.code,
+            displayName: currentSession.displayName,
+            participantId: currentSession.participantId,
+            authToken: currentSession.authToken,
+          }).then((result) => {
+            if (result.ok && result.room) {
+              setRoom(result.room)
+              setNotice('You are back in the room.')
+            }
+          }).catch(() => setError('Connection restored, but the room could not be rejoined.'))
+        }
+      })
+      activeSocket.on('disconnect', () => setSocketConnected(false))
+      activeSocket.on('connect_error', () => setError('Could not reach the watch-party server. Try again in a moment.'))
+      activeSocket.on('room:state', (nextRoom: RoomState) => {
+        if (roomRef.current?.playback.sourceUrl !== nextRoom.playback.sourceUrl) {
+          setMediaUrl(nextRoom.playback.sourceUrl)
+          setMediaError('')
+        }
+        setRoom(nextRoom)
+      })
+      activeSocket.on('room:screen-state', (state: { active: boolean }) => setScreenActive(state.active))
+      activeSocket.on('room:removed', () => {
+        setRoom(null)
+        setSession(null)
+        sessionRef.current = null
+        setError('The host removed you from this room.')
+      })
+      activeSocket.connect()
+    }
+    try {
+      if (!activeSocket.connected) {
+        await new Promise<void>((resolve, reject) => {
+          activeSocket!.once('connect', () => resolve())
+          activeSocket!.once('connect_error', () => reject(new Error('Could not connect to the watch-party server.')))
+        })
+      }
+      const payload = { displayName: name, participantId: id, authToken, ...(action === 'room:join' ? { code: roomCode.trim().toUpperCase() } : {}) }
+      const result = await emitAck<AckResponse<RoomState>>(activeSocket, action, payload)
+      if (!result.ok || !result.room || !result.participant) throw new Error(result.error ?? 'Could not enter that room.')
+      const nextSession = { code: result.room.code, participantId: result.participant.id, displayName: name, authToken: result.authToken ?? authToken }
+      sessionRef.current = nextSession
+      setSession(nextSession)
+      setRoom(result.room)
+      setMediaUrl(result.room.playback.sourceUrl)
+      setMediaError('')
+      setRoomCode(result.room.code)
+      setError('')
+      history.replaceState(null, '', `?room=${result.room.code}`)
+      setSocketConnected(true)
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : 'Could not enter the room.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function playback(action: 'load' | 'play' | 'pause' | 'seek', currentTime = videoRef.current?.currentTime ?? 0, sourceUrl?: string) {
+    if (!room || !session || !socketRef.current) return
+    setError('')
+    void emitAck<AckResponse<RoomState>>(socketRef.current, 'room:playback', {
+      code: room.code, participantId: session.participantId, action, currentTime, sourceUrl,
+    }).then((result) => {
+      if (!result.ok) setError(result.error ?? 'Playback could not be synchronized.')
+    }).catch((issue) => setError(issue instanceof Error ? issue.message : 'Playback could not be synchronized.'))
+  }
+
+  async function copyInvite() {
+    if (!room) return
+    try {
+      await navigator.clipboard.writeText(`${location.origin}?room=${room.code}`)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1_800)
+    } catch {
+      setError(`Copy was blocked by the browser. Share room code ${room.code} instead.`)
+    }
+  }
+
+  function manageParticipant(event: 'room:role' | 'room:remove', targetId: string, role?: Role) {
+    if (!room || !session || !socketRef.current) return
+    const payload = { code: room.code, participantId: session.participantId, targetId, ...(role ? { role } : {}) }
+    void emitAck<AckResponse>(socketRef.current, event, payload).then((result) => {
+      if (!result.ok) setError(result.error ?? 'That participant action failed.')
+    }).catch((issue) => setError(issue instanceof Error ? issue.message : 'That participant action failed.'))
+  }
+
+  async function leaveRoom() {
+    if (session && socketRef.current?.connected) {
+      try {
+        await emitAck(socketRef.current, 'room:leave', { code: session.code, participantId: session.participantId })
+      } catch {
+        setNotice('The room connection closed before cleanup was confirmed.')
+      }
+    }
+    socketRef.current?.disconnect()
+    socketRef.current = null
+    sessionRef.current = null
+    liveKitRef.current?.disconnect()
+    liveKitRef.current = null
+    setSocketConnected(false)
+    setScreenConnected(false)
+    setScreenSharing(false)
+    setScreenActive(false)
+    setScreenTrack(null)
+    setRoom(null)
+    setSession(null)
+    setMode('video')
+    setError('')
+    setNotice('')
+    history.replaceState(null, '', location.pathname)
+  }
+
+  async function connectScreenShare(publish: boolean) {
+    if (!room || !session) return
+    const { Room: LiveKitRoom, RoomEvent, Track } = await import('livekit-client')
+    setScreenError('')
+    if (liveKitRef.current) {
+      if (publish && !screenSharing) await beginScreenCapture(liveKitRef.current)
+      return
+    }
+    try {
+      const response = await fetch(`${API_URL}/api/livekit/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomCode: room.code, participantId: session.participantId, authToken: session.authToken }),
+      })
+      const credentials = await response.json() as { url?: string; token?: string; error?: string }
+      if (!response.ok || !credentials.url || !credentials.token) throw new Error(credentials.error ?? 'Screen sharing is not available.')
+      const liveKitRoom = new LiveKitRoom({ adaptiveStream: true, dynacast: true })
+      liveKitRoom.on(RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === Track.Kind.Video) {
+          setScreenTrack(track)
+          setMode('screen')
+        }
+        if (track.kind === Track.Kind.Audio) setScreenAudioTrack(track)
+      })
+      liveKitRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
+        if (track.kind === Track.Kind.Video) setScreenTrack(null)
+        if (track.kind === Track.Kind.Audio) setScreenAudioTrack(null)
+      })
+      liveKitRoom.on(RoomEvent.Disconnected, () => {
+        setScreenConnected(false)
+        setScreenSharing(false)
+        setScreenTrack(null)
+        setScreenAudioTrack(null)
+      })
+      await liveKitRoom.connect(credentials.url, credentials.token)
+      liveKitRef.current = liveKitRoom
+      setScreenConnected(true)
+      for (const remote of liveKitRoom.remoteParticipants.values()) {
+        for (const publication of remote.trackPublications.values()) {
+          if (publication.track?.kind === Track.Kind.Video) setScreenTrack(publication.track)
+          if (publication.track?.kind === Track.Kind.Audio) setScreenAudioTrack(publication.track)
+        }
+      }
+      if (publish) await beginScreenCapture(liveKitRoom)
+    } catch (issue) {
+      setScreenError(issue instanceof Error ? issue.message : 'Could not connect to screen sharing.')
+      liveKitRef.current?.disconnect()
+      liveKitRef.current = null
+      setScreenConnected(false)
+    }
+  }
+
+  async function beginScreenCapture(liveKitRoom: LiveKitRoomType) {
+    try {
+      const { createLocalScreenTracks, Track } = await import('livekit-client')
+      const tracks = await createLocalScreenTracks({ audio: true, resolution: { width: 1920, height: 1080 } })
+      const videoTrack = tracks.find((track) => track.kind === Track.Kind.Video)
+      const audioTrack = tracks.find((track) => track.kind === Track.Kind.Audio)
+      if (!videoTrack) throw new Error('Your browser did not provide a screen video track.')
+      for (const track of tracks) await liveKitRoom.localParticipant.publishTrack(track)
+      setScreenTrack(videoTrack)
+      setScreenAudioTrack(audioTrack ?? null)
+      setScreenSharing(true)
+      setMode('screen')
+      videoTrack.mediaStreamTrack.addEventListener('ended', stopScreenShare, { once: true })
+      socketRef.current?.emit('screen:active', { code: room?.code, participantId: session?.participantId, active: true })
+    } catch (issue) {
+      setScreenError(issue instanceof Error ? issue.message : 'Screen sharing was cancelled or unavailable.')
+    }
+  }
+
+  function stopScreenShare() {
+    const liveKitRoom = liveKitRef.current
+    if (liveKitRoom) {
+      for (const publication of liveKitRoom.localParticipant.trackPublications.values()) {
+        if (publication.source === 'screen_share' && publication.track) {
+          void liveKitRoom.localParticipant.unpublishTrack(publication.track, true)
+        }
+      }
+    }
+    socketRef.current?.emit('screen:active', { code: room?.code, participantId: session?.participantId, active: false })
+    setScreenSharing(false)
+    setScreenTrack(null)
+    setScreenAudioTrack(null)
+  }
+
+  if (!room || !session) {
+    return (
+      <main className="entry-shell">
+        <div className="entry-backdrop" aria-hidden="true" />
+        <header className="topbar entry-topbar">
+          <a className="brand" href="/" aria-label="LumaLoop home"><span className="brand-mark"><Film size={19} strokeWidth={2.2} /></span><span>LumaLoop</span></a>
+          <div className="topbar-note"><span className="status-dot" /> A little closer, even from far away</div>
+        </header>
+        <section className="entry-content">
+          <div className="entry-copy">
+            <p className="eyebrow"><Clapperboard size={14} /> YOUR PRIVATE SCREENING ROOM</p>
+            <h1>Good stories<br /><em>are better shared.</em></h1>
+            <p className="entry-description">Press play together, wherever everyone happens to be.</p>
+            <div className="film-strip" aria-label="A quiet night at the movies">
+              <img src="https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=960&q=85" alt="Rows of red cinema seats facing a movie screen" />
+              <div className="film-caption"><span>TONIGHT'S FEATURE</span><strong>Your people. Your pick.</strong></div>
+              <div className="film-index">01 <span>/</span> 03</div>
+            </div>
+          </div>
+          <div className="entry-panel">
+            <div className="panel-heading"><span className="panel-icon"><Users size={19} /></span><div><h2>Start your watch party</h2><p>No accounts. Just a name and a link.</p></div></div>
+            <label className="field-label" htmlFor="display-name">Your name</label>
+            <input id="display-name" className="text-input" value={displayName} maxLength={32} placeholder="What should we call you?" onChange={(event) => setDisplayName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void connectToRoom('room:create') }} />
+            <button className="primary-button create-button" type="button" disabled={busy} onClick={() => void connectToRoom('room:create')}>
+              {busy ? <LoaderCircle className="spin" size={17} /> : <Plus size={18} />} Create a room <ArrowUpRight size={17} />
+            </button>
+            <div className="form-divider"><span /> OR JOIN YOUR FRIENDS <span /></div>
+            <label className="field-label" htmlFor="room-code">Room code</label>
+            <div className="join-row">
+              <div className="code-field"><Link2 size={17} /><input id="room-code" value={roomCode} maxLength={6} placeholder="e.g. H7K9Q2" onChange={(event) => setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} onKeyDown={(event) => { if (event.key === 'Enter') void connectToRoom('room:join') }} /></div>
+              <button className="secondary-button join-button" type="button" disabled={busy} onClick={() => void connectToRoom('room:join')}>{busy ? <LoaderCircle className="spin" size={17} /> : <>Join room <ArrowUpRight size={16} /></>}</button>
+            </div>
+            {error && <p className="inline-error" role="alert">{error}</p>}
+            <div className="privacy-note"><ShieldCheck size={16} /><span>Your room is private to anyone with its invite link. No account needed.</span><CircleHelp size={15} aria-label="No user tracking or passwords" /></div>
+          </div>
+        </section>
+        <footer className="entry-footer"><span>© 2026 LumaLoop</span><span>Made for movie nights, long distance and otherwise</span></footer>
+      </main>
+    )
+  }
+
+  const playbackState = room.playback
+  const elapsed = playbackState.currentTime + (playbackState.isPlaying ? Math.max(0, Date.now() - playbackState.updatedAt) / 1000 : 0)
+  const mediaFormatError = playbackSource && !/\.(mp4|webm|m3u8)$/i.test(new URL(playbackSource).pathname)
+    ? 'Use a direct MP4, WebM, or M3U8 link. Protected or provider-hosted streams may not be playable here.'
+    : ''
+  const visibleMediaError = mediaError || mediaFormatError
+
+  return (
+    <main className="room-shell">
+      <header className="topbar room-topbar">
+        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); leaveRoom() }} aria-label="Leave room and go home"><span className="brand-mark"><Film size={19} strokeWidth={2.2} /></span><span>LumaLoop</span></a>
+        <div className="room-context"><span className="room-live-dot" /> PRIVATE ROOM <span className="context-divider">/</span> <strong>{room.code}</strong></div>
+        <div className="topbar-actions"><button className="invite-button" type="button" onClick={() => void copyInvite()}>{copied ? <Check size={16} /> : <Copy size={16} />}<span>{copied ? 'Copied' : 'Invite'}</span></button><button className="icon-button leave-button" type="button" title="Leave room" aria-label="Leave room" onClick={leaveRoom}><LogOut size={17} /></button></div>
+      </header>
+      <div className="room-workspace">
+        <section className="watch-column">
+          <div className="watch-heading"><div><p className="eyebrow">NOW PLAYING TOGETHER</p><h1>{mode === 'video' ? 'The screening room' : 'On the big screen'}</h1></div><div className={`connection-pill ${socketConnected ? 'is-online' : 'is-offline'}`}><span />{socketConnected ? 'Connected' : 'Reconnecting'}</div></div>
+          <nav className="mode-tabs" aria-label="Room mode">
+            <button className={mode === 'video' ? 'active' : ''} type="button" onClick={() => setMode('video')}><Film size={16} /> Watch video</button>
+            <button className={mode === 'screen' ? 'active' : ''} type="button" onClick={() => { setMode('screen'); if (!screenConnected) void connectScreenShare(false) }}><MonitorPlay size={16} /> Screen share{screenActive && <span className="tab-live-dot" />}</button>
+          </nav>
+          {mode === 'video' ? (
+            <>
+              <div className="media-frame">
+                {playbackState.sourceUrl ? <video ref={videoRef} className="video-player" playsInline muted={muted} controls={canControl} onPlay={() => { if (canControl && !playbackState.isPlaying) playback('play') }} onPause={() => { if (canControl && playbackState.isPlaying) playback('pause') }} onSeeked={() => { if (syncingSeekRef.current) { syncingSeekRef.current = false; return } if (canControl) playback('seek') }} onLoadedMetadata={() => { const current = roomRef.current?.playback; if (current && videoRef.current) videoRef.current.currentTime = current.currentTime }} onError={() => setMediaError('This video could not be loaded. The link may be private, blocked by CORS, or require provider access.')} /> : <div className="empty-player"><div className="reel-icon"><Film size={31} /></div><p className="eyebrow">THE SCREEN IS YOURS</p><h2>Pick the first feature.</h2><p>Paste a direct MP4, WebM, or M3U8 link to begin.</p></div>}
+                {visibleMediaError && playbackState.sourceUrl && <div className="player-error" role="alert"><CircleHelp size={20} /><span>{visibleMediaError}</span></div>}
+                <div className="player-corner-mark"><span className="brand-mark"><Film size={14} /></span> LUMALOOP</div>
+              </div>
+              <div className="playback-meta"><div className="playback-status"><span className={playbackState.isPlaying ? 'playing-pulse' : 'paused-mark'} />{playbackState.isPlaying ? 'Playing in sync' : 'Paused'}<span className="timecode">{readableTime(elapsed)}</span></div><button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button></div>
+              {canControl && <form className="source-form" onSubmit={(event) => { event.preventDefault(); playback('load', 0, mediaUrl.trim()) }}><div className="source-label"><span className="mini-label">VIDEO SOURCE</span><span>Direct links only</span></div><div className="source-row"><input aria-label="Video URL" value={mediaUrl} onChange={(event) => setMediaUrl(event.target.value)} placeholder="Paste an MP4, WebM or HLS link"/><button type="submit" disabled={!mediaUrl.trim()}><Play size={15} /> Load video</button></div></form>}
+              {!canControl && playbackState.sourceUrl && <div className="guest-status"><ShieldCheck size={15} /> Playback is directed by {room.participants.find((participant) => participant.role === 'host')?.displayName ?? 'the host'}.</div>}
+            </>
+          ) : (
+            <div className="screen-stage">
+              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
+              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && <button className="share-button" type="button" onClick={() => void connectScreenShare(true)}><ScreenShare size={16} /> Share my screen</button>}</div>
+              {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
+              {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
+            </div>
+          )}
+          {error && <p className="inline-error room-error" role="alert">{error}</p>}
+          {notice && <p className="inline-notice" role="status">{notice}</p>}
+          <div className="room-bottomline"><span><ShieldCheck size={15} /> No accounts or passwords</span><span>Share only media you have permission to watch.</span></div>
+        </section>
+        <aside className="people-panel">
+          <div className="people-heading"><div><p className="eyebrow">THE COMPANY</p><h2>In the room <span>{room.participants.filter((participant) => participant.connected).length}</span></h2></div><Users size={18} /></div>
+          <div className="people-list">
+            {room.participants.map((participant, index) => {
+              const isSelf = participant.id === session.participantId
+              return <div className={`person-row ${!participant.connected ? 'is-away' : ''}`} key={participant.id} style={{ animationDelay: `${index * 45}ms` }}>
+                <div className={`avatar avatar-${index % 5}`}>{participant.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</div>
+                <div className="person-copy"><strong>{participant.displayName}{isSelf && <span className="you-tag">YOU</span>}</strong><span>{participant.connected ? participant.role === 'cohost' ? 'Co-host' : participant.role === 'host' ? 'Room host' : 'Guest' : 'Reconnecting...'}</span></div>
+                {participant.role === 'host' ? <Crown className="role-icon host-icon" size={15} aria-label="Host" /> : isHost && !isSelf ? <div className="person-actions"><select aria-label={`Set ${participant.displayName} role`} value={participant.role} onChange={(event) => manageParticipant('room:role', participant.id, event.target.value as Role)}><option value="guest">Guest</option><option value="cohost">Co-host</option></select><button type="button" title={`Remove ${participant.displayName}`} aria-label={`Remove ${participant.displayName}`} onClick={() => manageParticipant('room:remove', participant.id)}><X size={14} /></button></div> : participant.role === 'cohost' ? <span className="cohost-tag">CO-HOST</span> : <span className="guest-dot" />}
+              </div>
+            })}
+          </div>
+          <div className="invite-block"><div className="invite-block-head"><span className="invite-icon"><Link2 size={16} /></span><div><strong>Bring someone in</strong><span>They can join with this room code.</span></div></div><button className="room-code-button" type="button" onClick={() => void copyInvite()}><span>{room.code}</span>{copied ? <Check size={16} /> : <Copy size={16} />}</button><p className="invite-footnote">Anyone with the invite link can enter. Share it privately.</p></div>
+          <div className="role-note"><Crown size={15} /><span>{isHost ? 'You are the host. You can promote a co-host and manage the room.' : canControl ? 'You can manage playback as a co-host.' : 'The host and co-host manage playback.'}</span><ChevronDown size={14} /></div>
+          <div className="connection-note"><span className={socketConnected ? 'connected-indicator' : 'disconnected-indicator'} />{socketConnected ? 'Everyone is up to date' : 'Reconnecting to the room'}<span className="connection-lock"><ShieldCheck size={14} /></span></div>
+        </aside>
+      </div>
+    </main>
+  )
+}
+
+export default App

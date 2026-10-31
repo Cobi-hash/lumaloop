@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lumaloop-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: FRONTEND_ORIGINS
+        value: http://localhost:5173
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false

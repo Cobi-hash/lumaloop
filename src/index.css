@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap');
+
+:root {
+  --ink: #171b18;
+  --paper: #eeeee4;
+  --lime: #c7ed6c;
+  --coral: #ec775e;
+  --display: 'DM Sans', 'Segoe UI Variable', 'Trebuchet MS', sans-serif;
+  --editorial: 'Newsreader', Georgia, serif;
+  --mono: 'DM Mono', 'Cascadia Mono', Consolas, monospace;
+  font-family: var(--display);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  color: var(--paper);
+  background: var(--ink);
+}
+
+* { box-sizing: border-box; }
+
+html { min-width: 320px; min-height: 100%; background: var(--ink); }
+
+body { min-width: 320px; min-height: 100vh; margin: 0; }
+
+button,
+input,
+select { font: inherit; }
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible { outline: 2px solid var(--lime); outline-offset: 3px; }
+
+::selection { color: #20261a; background: var(--lime); }
+
+#root { min-height: 100vh; }
