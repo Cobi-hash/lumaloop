@@ -160,6 +160,7 @@ function App() {
   const [notice, setNotice] = useState('')
   const [mode, setMode] = useState<Mode>('video')
   const [muted, setMuted] = useState(() => localStorage.getItem('lumaloop.muted') !== 'false')
+  const [screenAudioMuted, setScreenAudioMuted] = useState(true)
   const [mediaUrl, setMediaUrl] = useState('')
   const [mediaError, setMediaError] = useState('')
   const [screenError, setScreenError] = useState('')
@@ -196,6 +197,10 @@ function App() {
   useEffect(() => {
     roomRef.current = room
   }, [room])
+
+  useEffect(() => {
+    if (self) setScreenAudioMuted(canControl)
+  }, [self?.role])
 
   useEffect(() => {
     const updateFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement))
@@ -687,11 +692,11 @@ function App() {
           ) : (
             <div className="screen-experience" onPointerEnter={revealMediaControls} onPointerMove={revealMediaControls} onPointerDown={revealMediaControls} onPointerLeave={scheduleMediaControlsHide} onFocusCapture={revealMediaControls}>
             <div className="screen-stage" ref={screenStageRef}>
-              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? canControl ? 'Open your video source in another tab, then choose it in the share picker. Enable Share tab audio if available.' : 'The host or co-host can start sharing at any time.' : 'Connect to the room screen, then choose a browser tab, window, or display to share.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
+              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={screenAudioMuted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? canControl ? 'Open your video source in another tab, then choose it in the share picker. Enable Share tab audio if available.' : 'The host or co-host can start sharing at any time.' : 'Connect to the room screen, then choose a browser tab, window, or display to share.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
               <div className={`screen-stage-footer media-controls-overlay ${mediaControlsVisible ? 'controls-visible' : 'controls-hidden'}`} aria-hidden={!mediaControlsVisible}>
                 <span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>
                 <div className="screen-footer-actions">
-                  <button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} aria-label={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button>
+                  <button className="local-audio" type="button" title={screenAudioMuted ? 'Unmute this device' : 'Mute this device'} aria-label={screenAudioMuted ? 'Unmute this device' : 'Mute this device'} onClick={() => setScreenAudioMuted((current) => !current)}>{screenAudioMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}<span>{screenAudioMuted ? 'Unmute me' : 'Mute me'}</span></button>
                   <button className="icon-button media-fullscreen-button" type="button" disabled={!screenTrack} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => void toggleFullscreen(screenStageRef.current)}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
                   {screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenActive && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Choose what to share</button>}
                 </div>
