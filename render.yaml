@@ -2,6 +2,7 @@ services:
   - type: web
     name: lumaloop-api
     runtime: node
+    plan: free
     rootDir: server
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
