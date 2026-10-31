@@ -28,6 +28,37 @@ import './App.css'
 
 type Role = 'host' | 'cohost' | 'guest'
 type Mode = 'video' | 'screen'
+type ScreenTrackFactory = typeof import('livekit-client')['createLocalScreenTracks']
+type ScreenTracksPromise = ReturnType<ScreenTrackFactory>
+type ScreenQuality = 'smooth' | 'balanced' | 'sharp'
+type ScreenFrameRate = 15 | 30 | 60
+
+interface ScreenShareSettings {
+  quality: ScreenQuality
+  frameRate: ScreenFrameRate
+  shareAudio: boolean
+}
+
+const SCREEN_SETTINGS_KEY = 'lumaloop.screenShareSettings'
+const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'smooth', frameRate: 30, shareAudio: true }
+const SCREEN_QUALITY_PRESETS = {
+  smooth: { label: 'Smooth motion · 720p', width: 1280, height: 720, maxBitrate: 2_500_000, contentHint: 'motion', degradationPreference: 'maintain-framerate' },
+  balanced: { label: 'Balanced · 1080p', width: 1920, height: 1080, maxBitrate: 4_500_000, contentHint: 'detail', degradationPreference: 'balanced' },
+  sharp: { label: 'Text clarity · 1080p', width: 1920, height: 1080, maxBitrate: 6_000_000, contentHint: 'text', degradationPreference: 'maintain-resolution' },
+} as const
+
+function readScreenShareSettings(): ScreenShareSettings {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SCREEN_SETTINGS_KEY) ?? 'null') as Partial<ScreenShareSettings> | null
+    return {
+      quality: saved?.quality === 'balanced' || saved?.quality === 'sharp' ? saved.quality : 'smooth',
+      frameRate: saved?.frameRate === 15 || saved?.frameRate === 60 ? saved.frameRate : 30,
+      shareAudio: typeof saved?.shareAudio === 'boolean' ? saved.shareAudio : DEFAULT_SCREEN_SETTINGS.shareAudio,
+    }
+  } catch {
+    return DEFAULT_SCREEN_SETTINGS
+  }
+}
 
 interface Participant {
   id: string
@@ -118,6 +149,7 @@ function App() {
   const [screenConnected, setScreenConnected] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
   const [screenActive, setScreenActive] = useState(false)
+  const [screenShareSettings, setScreenShareSettings] = useState(readScreenShareSettings)
   const [screenTrack, setScreenTrack] = useState<LiveKitTrackType | null>(null)
   const [screenAudioTrack, setScreenAudioTrack] = useState<LiveKitTrackType | null>(null)
   const [copied, setCopied] = useState(false)
@@ -129,6 +161,7 @@ function App() {
   const screenVideoRef = useRef<HTMLVideoElement>(null)
   const screenAudioRef = useRef<HTMLAudioElement>(null)
   const liveKitRef = useRef<LiveKitRoomType | null>(null)
+  const screenTrackFactoryRef = useRef<ScreenTrackFactory | null>(null)
 
   const self = room?.participants.find((participant) => participant.id === session?.participantId)
   const canControl = self?.role === 'host' || self?.role === 'cohost'
@@ -357,15 +390,20 @@ function App() {
     history.replaceState(null, '', location.pathname)
   }
 
-  async function connectScreenShare(publish: boolean) {
+  async function connectScreenShare(
+    publish: boolean,
+    pendingScreenTracks?: ScreenTracksPromise,
+    settings: ScreenShareSettings = screenShareSettings,
+  ) {
     if (!room || !session) return
-    const { Room: LiveKitRoom, RoomEvent, Track } = await import('livekit-client')
     setScreenError('')
-    if (liveKitRef.current) {
-      if (publish && !screenSharing) await beginScreenCapture(liveKitRef.current)
-      return
-    }
     try {
+      const { Room: LiveKitRoom, RoomEvent, Track, createLocalScreenTracks } = await import('livekit-client')
+      screenTrackFactoryRef.current = createLocalScreenTracks
+      if (liveKitRef.current) {
+        if (publish && pendingScreenTracks) await publishScreenCapture(liveKitRef.current, pendingScreenTracks, settings)
+        return
+      }
       const response = await fetch(`${API_URL}/api/livekit/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -400,7 +438,7 @@ function App() {
           if (publication.track?.kind === Track.Kind.Audio) setScreenAudioTrack(publication.track)
         }
       }
-      if (publish) await beginScreenCapture(liveKitRoom)
+      if (publish && pendingScreenTracks) await publishScreenCapture(liveKitRoom, pendingScreenTracks, settings)
     } catch (issue) {
       setScreenError(issue instanceof Error ? issue.message : 'Could not connect to screen sharing.')
       liveKitRef.current?.disconnect()
@@ -409,14 +447,54 @@ function App() {
     }
   }
 
-  async function beginScreenCapture(liveKitRoom: LiveKitRoomType) {
+  function startScreenShare() {
+    if (!room || !session) return
+    const createLocalScreenTracks = screenTrackFactoryRef.current
+    if (!createLocalScreenTracks) {
+      setScreenError('Screen sharing is still connecting. Try again in a moment.')
+      void connectScreenShare(false)
+      return
+    }
+
+    setScreenError('')
+    const settings = { ...screenShareSettings }
+    const preset = SCREEN_QUALITY_PRESETS[settings.quality]
     try {
-      const { createLocalScreenTracks, Track } = await import('livekit-client')
-      const tracks = await createLocalScreenTracks({ audio: true, resolution: { width: 1920, height: 1080 } })
+      const pendingScreenTracks = createLocalScreenTracks({
+        audio: settings.shareAudio,
+        resolution: { width: preset.width, height: preset.height, frameRate: settings.frameRate },
+        contentHint: preset.contentHint,
+        systemAudio: settings.shareAudio ? 'include' : 'exclude',
+      })
+      const liveKitRoom = liveKitRef.current
+      if (liveKitRoom) void publishScreenCapture(liveKitRoom, pendingScreenTracks, settings)
+      else void connectScreenShare(true, pendingScreenTracks, settings)
+    } catch (issue) {
+      setScreenError(screenCaptureError(issue))
+    }
+  }
+
+  async function publishScreenCapture(
+    liveKitRoom: LiveKitRoomType,
+    pendingScreenTracks: ScreenTracksPromise,
+    settings: ScreenShareSettings,
+  ) {
+    try {
+      const tracks = await pendingScreenTracks
+      const { Track } = await import('livekit-client')
       const videoTrack = tracks.find((track) => track.kind === Track.Kind.Video)
       const audioTrack = tracks.find((track) => track.kind === Track.Kind.Audio)
       if (!videoTrack) throw new Error('Your browser did not provide a screen video track.')
-      for (const track of tracks) await liveKitRoom.localParticipant.publishTrack(track)
+      const preset = SCREEN_QUALITY_PRESETS[settings.quality]
+      videoTrack.mediaStreamTrack.contentHint = preset.contentHint
+      await liveKitRoom.localParticipant.publishTrack(videoTrack, {
+        source: Track.Source.ScreenShare,
+        screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: settings.frameRate },
+        degradationPreference: preset.degradationPreference,
+      })
+      if (audioTrack) {
+        await liveKitRoom.localParticipant.publishTrack(audioTrack, { source: Track.Source.ScreenShareAudio })
+      }
       setScreenTrack(videoTrack)
       setScreenAudioTrack(audioTrack ?? null)
       setScreenSharing(true)
@@ -424,8 +502,21 @@ function App() {
       videoTrack.mediaStreamTrack.addEventListener('ended', stopScreenShare, { once: true })
       socketRef.current?.emit('screen:active', { code: room?.code, participantId: session?.participantId, active: true })
     } catch (issue) {
-      setScreenError(issue instanceof Error ? issue.message : 'Screen sharing was cancelled or unavailable.')
+      setScreenError(screenCaptureError(issue))
     }
+  }
+
+  function screenCaptureError(issue: unknown) {
+    if (issue instanceof Error && ['NotAllowedError', 'PermissionDeniedError'].includes(issue.name)) {
+      return 'Screen capture was denied. Click Share my screen and approve the browser sharing prompt.'
+    }
+    return issue instanceof Error ? issue.message : 'Screen sharing was cancelled or unavailable.'
+  }
+
+  function updateScreenShareSettings(update: Partial<ScreenShareSettings>) {
+    const next = { ...screenShareSettings, ...update }
+    setScreenShareSettings(next)
+    localStorage.setItem(SCREEN_SETTINGS_KEY, JSON.stringify(next))
   }
 
   function stopScreenShare() {
@@ -518,8 +609,31 @@ function App() {
             </>
           ) : (
             <div className="screen-stage">
-              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}{screenConnected && canControl && <button className="share-button screen-share-cta" type="button" onClick={() => void connectScreenShare(true)}><ScreenShare size={16} /> Share my screen</button>}</div>}
-              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenConnected && <button className="share-button" type="button" onClick={() => void connectScreenShare(true)}><ScreenShare size={16} /> Share my screen</button>}</div>
+              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}{screenConnected && canControl && <button className="share-button screen-share-cta" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>}
+              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenConnected && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>
+              {canControl && <div className="screen-settings-strip" aria-label="Screen-share settings">
+                <label className="screen-setting">
+                  <span>QUALITY</span>
+                  <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
+                    <option value="smooth">Smooth motion · 720p</option>
+                    <option value="balanced">Balanced · 1080p</option>
+                    <option value="sharp">Text clarity · 1080p</option>
+                  </select>
+                </label>
+                <label className="screen-setting screen-fps-setting">
+                  <span>FRAME RATE</span>
+                  <select value={screenShareSettings.frameRate} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ frameRate: Number(event.target.value) as ScreenFrameRate })}>
+                    <option value="15">15 FPS</option>
+                    <option value="30">30 FPS</option>
+                    <option value="60">60 FPS (when supported)</option>
+                  </select>
+                </label>
+                <label className="screen-audio-toggle">
+                  <input type="checkbox" checked={screenShareSettings.shareAudio} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ shareAudio: event.target.checked })} />
+                  <span>Share available audio</span>
+                </label>
+                <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : 'Higher quality and frame rates use more bandwidth. Browser and network limits may reduce them.'}</p>
+              </div>}
               {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
               {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
             </div>

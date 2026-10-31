@@ -436,6 +436,13 @@
 .screen-share-cta { margin-top: 17px; min-height: 38px; padding: 0 15px; }
 .screen-stage-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 15px; color: #aab4a7; border-top: 1px solid #333b33; background: #171c18; font-size: 10px; }
 .screen-stage-footer > span { display: inline-flex; align-items: center; gap: 9px; }
+.screen-settings-strip { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, .8fr) auto; align-items: end; gap: 12px; padding: 12px 14px; border-top: 1px solid #333b33; background: #1b201c; }
+.screen-setting { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.screen-setting > span { color: #b7c1b3; font-family: var(--mono); font-size: 8px; letter-spacing: .1em; }
+.screen-setting select { width: 100%; min-width: 0; height: 35px; padding: 0 9px; color: var(--paper); border: 1px solid #465044; border-radius: 3px; background: #202620; font-size: 10px; }
+.screen-audio-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 35px; color: #c3ccbd; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.screen-audio-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--lime); }
+.screen-settings-note { grid-column: 1 / -1; margin: 0; color: #879283; font-size: 9px; line-height: 1.4; }
 .share-button { min-height: 32px; padding: 0 11px; color: #20261a; background: var(--lime); font-size: 10px; }
 .stop-share { min-height: 32px; padding: 0 11px; color: #ffe3db; border-color: rgba(236, 119, 94, .46); background: rgba(236, 119, 94, .09); font-size: 10px; }
 .screen-limit-note { display: flex; align-items: center; gap: 7px; margin: 12px 0 0; color: #8e988c; font-size: 10px; }
@@ -534,6 +541,8 @@
   .mode-tabs button { padding: 0 11px; }
   .media-frame { aspect-ratio: 16 / 10; }
   .screen-stage { min-height: 310px; }
+  .screen-settings-strip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 11px; }
+  .screen-audio-toggle { grid-column: 1 / -1; }
   .people-panel { order: 2; }
   .room-bottomline span:last-child { text-align: right; }
 }
@@ -550,6 +559,8 @@
   .room-context .context-divider { display: none; }
   .room-code-button span { font-size: 12px; }
   .room-workspace { width: calc(100% - 22px); }
+  .screen-settings-strip { grid-template-columns: minmax(0, 1fr); }
+  .screen-audio-toggle { grid-column: auto; }
   .watch-heading h1 { font-size: 22px; }
   .connection-pill { font-size: 0; }
   .connection-pill span { width: 7px; height: 7px; }
