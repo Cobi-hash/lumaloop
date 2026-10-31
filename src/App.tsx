@@ -46,8 +46,23 @@ const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'balanced', fram
 const SCREEN_QUALITY_PRESETS = {
   smooth: { label: 'Smooth motion · 1080p', width: 1920, height: 1080, maxBitrate: 6_000_000, contentHint: 'motion', degradationPreference: 'maintain-framerate' },
   balanced: { label: 'Balanced · 1080p', width: 1920, height: 1080, maxBitrate: 8_000_000, contentHint: 'detail', degradationPreference: 'balanced' },
-  sharp: { label: 'Text clarity · 1080p', width: 1920, height: 1080, maxBitrate: 10_000_000, contentHint: 'text', degradationPreference: 'maintain-resolution' },
+  sharp: { label: 'Original detail · up to 4K', width: 3840, height: 2160, maxBitrate: 14_000_000, contentHint: 'text', degradationPreference: 'maintain-resolution' },
 } as const
+
+function requestedScreenResolution(preset: typeof SCREEN_QUALITY_PRESETS[ScreenQuality], frameRate: ScreenFrameRate) {
+  if (preset.width !== 3840 || preset.height !== 2160) {
+    return { width: preset.width, height: preset.height, frameRate }
+  }
+  const scaleFactor = window.devicePixelRatio || 1
+  const sourceWidth = (window.screen.width || 1920) * scaleFactor
+  const sourceHeight = (window.screen.height || 1080) * scaleFactor
+  const scale = Math.min(1, 3840 / sourceWidth, 2160 / sourceHeight)
+  return {
+    width: Math.round(sourceWidth * scale),
+    height: Math.round(sourceHeight * scale),
+    frameRate,
+  }
+}
 
 function readScreenShareSettings(): ScreenShareSettings {
   try {
@@ -512,7 +527,7 @@ function App() {
     try {
       const pendingScreenTracks = createLocalScreenTracks({
         audio: settings.shareAudio,
-        resolution: { width: preset.width, height: preset.height, frameRate: settings.frameRate },
+        resolution: requestedScreenResolution(preset, settings.frameRate),
         contentHint: preset.contentHint,
         systemAudio: settings.shareAudio ? 'include' : 'exclude',
       })
@@ -539,8 +554,8 @@ function App() {
       videoTrack.mediaStreamTrack.contentHint = preset.contentHint
       await liveKitRoom.localParticipant.publishTrack(videoTrack, {
         source: Track.Source.ScreenShare,
-        videoCodec: 'vp9',
-        backupCodec: { codec: 'h264' },
+        videoCodec: 'h264',
+        backupCodec: { codec: 'vp8' },
         backupCodecPolicy: BackupCodecPolicy.PREFER_REGRESSION,
         screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: settings.frameRate },
         degradationPreference: preset.degradationPreference,
@@ -687,7 +702,7 @@ function App() {
                 <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
                   <option value="smooth">Smooth motion · 1080p</option>
                   <option value="balanced">Balanced · 1080p</option>
-                  <option value="sharp">Text clarity · 1080p</option>
+                  <option value="sharp">Original detail · up to 4K</option>
                 </select>
               </label>
               <label className="screen-setting screen-fps-setting">
