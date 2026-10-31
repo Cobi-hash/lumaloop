@@ -608,35 +608,37 @@ function App() {
               {!canControl && playbackState.sourceUrl && <div className="guest-status"><ShieldCheck size={15} /> Playback is directed by {room.participants.find((participant) => participant.role === 'host')?.displayName ?? 'the host'}.</div>}
             </>
           ) : (
+            <>
             <div className="screen-stage">
-              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}{screenConnected && canControl && <button className="share-button screen-share-cta" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>}
-              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenConnected && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>
-              {canControl && <div className="screen-settings-strip" aria-label="Screen-share settings">
-                <label className="screen-setting">
-                  <span>QUALITY</span>
-                  <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
-                    <option value="smooth">Smooth motion · 720p</option>
-                    <option value="balanced">Balanced · 1080p</option>
-                    <option value="sharp">Text clarity · 1080p</option>
-                  </select>
-                </label>
-                <label className="screen-setting screen-fps-setting">
-                  <span>FRAME RATE</span>
-                  <select value={screenShareSettings.frameRate} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ frameRate: Number(event.target.value) as ScreenFrameRate })}>
-                    <option value="15">15 FPS</option>
-                    <option value="30">30 FPS</option>
-                    <option value="60">60 FPS (when supported)</option>
-                  </select>
-                </label>
-                <label className="screen-audio-toggle">
-                  <input type="checkbox" checked={screenShareSettings.shareAudio} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ shareAudio: event.target.checked })} />
-                  <span>Share available audio</span>
-                </label>
-                <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : 'Higher quality and frame rates use more bandwidth. Browser and network limits may reduce them.'}</p>
-              </div>}
+              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
+              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && screenConnected && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>
               {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
               {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
             </div>
+            {canControl && <div className="screen-settings-strip" aria-label="Screen-share settings">
+              <label className="screen-setting">
+                <span>QUALITY</span>
+                <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
+                  <option value="smooth">Smooth motion · 720p</option>
+                  <option value="balanced">Balanced · 1080p</option>
+                  <option value="sharp">Text clarity · 1080p</option>
+                </select>
+              </label>
+              <label className="screen-setting screen-fps-setting">
+                <span>FRAME RATE</span>
+                <select value={screenShareSettings.frameRate} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ frameRate: Number(event.target.value) as ScreenFrameRate })}>
+                  <option value="15">15 FPS</option>
+                  <option value="30">30 FPS</option>
+                  <option value="60">60 FPS (when supported)</option>
+                </select>
+              </label>
+              <label className="screen-audio-toggle">
+                <input type="checkbox" checked={screenShareSettings.shareAudio} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ shareAudio: event.target.checked })} />
+                <span>Share available audio</span>
+              </label>
+              <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : 'Higher quality and frame rates use more bandwidth. Browser and network limits may reduce them.'}</p>
+            </div>}
+            </>
           )}
           {error && <p className="inline-error room-error" role="alert">{error}</p>}
           {notice && <p className="inline-notice" role="status">{notice}</p>}
