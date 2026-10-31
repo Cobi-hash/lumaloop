@@ -152,6 +152,7 @@ function App() {
   const [screenSharing, setScreenSharing] = useState(false)
   const [screenActive, setScreenActive] = useState(false)
   const [screenShareSettings, setScreenShareSettings] = useState(readScreenShareSettings)
+  const [mediaControlsVisible, setMediaControlsVisible] = useState(true)
   const [screenTrack, setScreenTrack] = useState<LiveKitTrackType | null>(null)
   const [screenAudioTrack, setScreenAudioTrack] = useState<LiveKitTrackType | null>(null)
   const [copied, setCopied] = useState(false)
@@ -160,6 +161,7 @@ function App() {
   const sessionRef = useRef<Session | null>(null)
   const roomRef = useRef<RoomState | null>(null)
   const syncingSeekRef = useRef(false)
+  const mediaControlsTimerRef = useRef<number | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const mediaFrameRef = useRef<HTMLDivElement>(null)
   const screenStageRef = useRef<HTMLDivElement>(null)
@@ -260,6 +262,7 @@ function App() {
   }, [screenAudioTrack])
 
   useEffect(() => () => {
+    if (mediaControlsTimerRef.current !== null) window.clearTimeout(mediaControlsTimerRef.current)
     liveKitRef.current?.disconnect()
     socketRef.current?.disconnect()
   }, [])
@@ -296,6 +299,7 @@ function App() {
           }).then((result) => {
             if (result.ok && result.room) {
               setRoom(result.room)
+              revealMediaControls()
               setNotice('You are back in the room.')
             }
           }).catch(() => setError('Connection restored, but the room could not be rejoined.'))
@@ -333,6 +337,7 @@ function App() {
       sessionRef.current = nextSession
       setSession(nextSession)
       setRoom(result.room)
+      revealMediaControls()
       setMediaUrl(result.room.playback.sourceUrl)
       setMediaError('')
       setRoomCode(result.room.code)
@@ -364,6 +369,23 @@ function App() {
     } catch {
       setError('The browser could not enter fullscreen. Check its site permissions and try again.')
     }
+  }
+
+  function revealMediaControls() {
+    setMediaControlsVisible(true)
+    if (mediaControlsTimerRef.current !== null) window.clearTimeout(mediaControlsTimerRef.current)
+    mediaControlsTimerRef.current = window.setTimeout(() => {
+      setMediaControlsVisible(false)
+      mediaControlsTimerRef.current = null
+    }, 2_400)
+  }
+
+  function scheduleMediaControlsHide() {
+    if (mediaControlsTimerRef.current !== null) window.clearTimeout(mediaControlsTimerRef.current)
+    mediaControlsTimerRef.current = window.setTimeout(() => {
+      setMediaControlsVisible(false)
+      mediaControlsTimerRef.current = null
+    }, 2_000)
   }
 
   async function copyInvite() {
@@ -621,31 +643,31 @@ function App() {
         <section className="watch-column">
           <div className="watch-heading"><div><p className="eyebrow">NOW PLAYING TOGETHER</p><h1>{mode === 'video' ? 'The screening room' : 'On the big screen'}</h1></div><div className={`connection-pill ${socketConnected ? 'is-online' : 'is-offline'}`}><span />{socketConnected ? 'Connected' : 'Reconnecting'}</div></div>
           <nav className="mode-tabs" aria-label="Room mode">
-            <button className={mode === 'video' ? 'active' : ''} type="button" onClick={() => setMode('video')}><Film size={16} /> Watch video</button>
-            <button className={mode === 'screen' ? 'active' : ''} type="button" onClick={() => { setMode('screen'); if (!screenConnected) void connectScreenShare(false) }}><MonitorPlay size={16} /> Screen share{screenActive && <span className="tab-live-dot" />}</button>
+            <button className={mode === 'video' ? 'active' : ''} type="button" onClick={() => { setMode('video'); revealMediaControls() }}><Film size={16} /> Watch video</button>
+            <button className={mode === 'screen' ? 'active' : ''} type="button" onClick={() => { setMode('screen'); revealMediaControls(); if (!screenConnected) void connectScreenShare(false) }}><MonitorPlay size={16} /> Screen share{screenActive && <span className="tab-live-dot" />}</button>
           </nav>
           {mode === 'video' ? (
             <>
-              <div className="media-frame" ref={mediaFrameRef}>
+              <div className="media-frame" ref={mediaFrameRef} onPointerEnter={revealMediaControls} onPointerMove={revealMediaControls} onPointerDown={revealMediaControls} onPointerLeave={scheduleMediaControlsHide} onFocusCapture={revealMediaControls}>
                 {playbackState.sourceUrl ? <video ref={videoRef} className="video-player" playsInline muted={muted} controls={canControl} onPlay={() => { if (canControl && !playbackState.isPlaying) playback('play') }} onPause={() => { if (canControl && playbackState.isPlaying) playback('pause') }} onSeeked={() => { if (syncingSeekRef.current) { syncingSeekRef.current = false; return } if (canControl) playback('seek') }} onLoadedMetadata={() => { const current = roomRef.current?.playback; if (current && videoRef.current) videoRef.current.currentTime = current.currentTime }} onError={() => setMediaError('This video could not be loaded. The link may be private, blocked by CORS, or require provider access.')} /> : <div className="empty-player"><div className="reel-icon"><Film size={31} /></div><p className="eyebrow">THE SCREEN IS YOURS</p><h2>Pick the first feature.</h2><p>Paste a direct MP4, WebM, or M3U8 link to begin.</p></div>}
                 {visibleMediaError && playbackState.sourceUrl && <div className="player-error" role="alert"><CircleHelp size={20} /><span>{visibleMediaError}</span></div>}
-                <div className="player-corner-mark"><span className="brand-mark"><Film size={14} /></span> LUMALOOP</div>
-              </div>
-              <div className="playback-meta">
-                <div className="playback-status"><span className={playbackState.isPlaying ? 'playing-pulse' : 'paused-mark'} />{playbackState.isPlaying ? 'Playing in sync' : 'Paused'}<span className="timecode">{readableTime(elapsed)}</span></div>
-                <div className="media-local-actions">
-                  <button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button>
-                  <button className="icon-button media-fullscreen-button" type="button" disabled={!playbackState.sourceUrl} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => void toggleFullscreen(mediaFrameRef.current)}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
-                </div>
+                <div className={`player-corner-mark ${mediaControlsVisible ? 'is-obscured' : ''}`}><span className="brand-mark"><Film size={14} /></span> LUMALOOP</div>
+                {playbackState.sourceUrl && <div className={`playback-meta media-controls-overlay ${mediaControlsVisible ? 'controls-visible' : 'controls-hidden'}`} aria-hidden={!mediaControlsVisible}>
+                  <div className="playback-status"><span className={playbackState.isPlaying ? 'playing-pulse' : 'paused-mark'} />{playbackState.isPlaying ? 'Playing in sync' : 'Paused'}<span className="timecode">{readableTime(elapsed)}</span></div>
+                  <div className="media-local-actions">
+                    <button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} aria-label={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button>
+                    <button className="icon-button media-fullscreen-button" type="button" title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => void toggleFullscreen(mediaFrameRef.current)}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+                  </div>
+                </div>}
               </div>
               {canControl && <form className="source-form" onSubmit={(event) => { event.preventDefault(); playback('load', 0, mediaUrl.trim()) }}><div className="source-label"><span className="mini-label">VIDEO SOURCE</span><span>Direct links only</span></div><div className="source-row"><input aria-label="Video URL" value={mediaUrl} onChange={(event) => setMediaUrl(event.target.value)} placeholder="Paste an MP4, WebM or HLS link"/><button type="submit" disabled={!mediaUrl.trim()}><Play size={15} /> Load video</button></div></form>}
               {!canControl && playbackState.sourceUrl && <div className="guest-status"><ShieldCheck size={15} /> Playback is directed by {room.participants.find((participant) => participant.role === 'host')?.displayName ?? 'the host'}.</div>}
             </>
           ) : (
-            <>
+            <div className="screen-experience" onPointerEnter={revealMediaControls} onPointerMove={revealMediaControls} onPointerDown={revealMediaControls} onPointerLeave={scheduleMediaControlsHide} onFocusCapture={revealMediaControls}>
             <div className="screen-stage" ref={screenStageRef}>
               {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
-              <div className="screen-stage-footer">
+              <div className={`screen-stage-footer media-controls-overlay ${mediaControlsVisible ? 'controls-visible' : 'controls-hidden'}`} aria-hidden={!mediaControlsVisible}>
                 <span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>
                 <div className="screen-footer-actions">
                   <button className="local-audio" type="button" title={muted ? 'Unmute this device' : 'Mute this device'} aria-label={muted ? 'Unmute this device' : 'Mute this device'} onClick={() => { const next = !muted; setMuted(next); localStorage.setItem('lumaloop.muted', String(next)) }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}<span>{muted ? 'Unmute me' : 'Mute me'}</span></button>
@@ -656,7 +678,7 @@ function App() {
               {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
               {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
             </div>
-            {canControl && <div className="screen-settings-strip" aria-label="Screen-share settings">
+            {canControl && mediaControlsVisible && <div className="screen-settings-strip" aria-label="Screen-share settings">
               <label className="screen-setting">
                 <span>QUALITY</span>
                 <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
@@ -679,7 +701,7 @@ function App() {
               </label>
               <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : 'Higher quality and frame rates use more bandwidth. Browser and network limits may reduce them.'}</p>
             </div>}
-            </>
+            </div>
           )}
           {error && <p className="inline-error room-error" role="alert">{error}</p>}
           {notice && <p className="inline-notice" role="status">{notice}</p>}
