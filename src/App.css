@@ -433,6 +433,7 @@
 .screen-stage > audio { display: none; }
 .screen-empty { flex: 1; }
 .screen-empty .secondary-button { margin-top: 17px; }
+.screen-share-cta { margin-top: 17px; min-height: 38px; padding: 0 15px; }
 .screen-stage-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 15px; color: #aab4a7; border-top: 1px solid #333b33; background: #171c18; font-size: 10px; }
 .screen-stage-footer > span { display: inline-flex; align-items: center; gap: 9px; }
 .share-button { min-height: 32px; padding: 0 11px; color: #20261a; background: var(--lime); font-size: 10px; }
