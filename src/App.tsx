@@ -424,10 +424,17 @@ function App() {
         if (track.kind === Track.Kind.Audio) setScreenAudioTrack(null)
       })
       liveKitRoom.on(RoomEvent.Disconnected, () => {
+        if (liveKitRef.current === liveKitRoom) liveKitRef.current = null
         setScreenConnected(false)
         setScreenSharing(false)
+        setScreenActive(false)
         setScreenTrack(null)
         setScreenAudioTrack(null)
+        socketRef.current?.emit('screen:active', {
+          code: room.code,
+          participantId: session.participantId,
+          active: false,
+        })
       })
       await liveKitRoom.connect(credentials.url, credentials.token)
       liveKitRef.current = liveKitRoom
@@ -611,7 +618,7 @@ function App() {
             <>
             <div className="screen-stage">
               {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={muted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? 'The host or co-host can start sharing at any time.' : 'Connect to the room screen to watch a shared tab, window, or display.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
-              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && screenConnected && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>
+              <div className="screen-stage-footer"><span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>{screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenActive && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Share my screen</button>}</div>
               {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
               {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
             </div>
