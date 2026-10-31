@@ -42,11 +42,11 @@ interface ScreenShareSettings {
 }
 
 const SCREEN_SETTINGS_KEY = 'lumaloop.screenShareSettings'
-const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'smooth', frameRate: 30, shareAudio: true }
+const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'balanced', frameRate: 30, shareAudio: true }
 const SCREEN_QUALITY_PRESETS = {
-  smooth: { label: 'Smooth motion · 720p', width: 1280, height: 720, maxBitrate: 2_500_000, contentHint: 'motion', degradationPreference: 'maintain-framerate' },
-  balanced: { label: 'Balanced · 1080p', width: 1920, height: 1080, maxBitrate: 4_500_000, contentHint: 'detail', degradationPreference: 'balanced' },
-  sharp: { label: 'Text clarity · 1080p', width: 1920, height: 1080, maxBitrate: 6_000_000, contentHint: 'text', degradationPreference: 'maintain-resolution' },
+  smooth: { label: 'Smooth motion · 1080p', width: 1920, height: 1080, maxBitrate: 6_000_000, contentHint: 'motion', degradationPreference: 'maintain-framerate' },
+  balanced: { label: 'Balanced · 1080p', width: 1920, height: 1080, maxBitrate: 8_000_000, contentHint: 'detail', degradationPreference: 'balanced' },
+  sharp: { label: 'Text clarity · 1080p', width: 1920, height: 1080, maxBitrate: 10_000_000, contentHint: 'text', degradationPreference: 'maintain-resolution' },
 } as const
 
 function readScreenShareSettings(): ScreenShareSettings {
@@ -531,7 +531,7 @@ function App() {
   ) {
     try {
       const tracks = await pendingScreenTracks
-      const { Track } = await import('livekit-client')
+      const { BackupCodecPolicy, Track } = await import('livekit-client')
       const videoTrack = tracks.find((track) => track.kind === Track.Kind.Video)
       const audioTrack = tracks.find((track) => track.kind === Track.Kind.Audio)
       if (!videoTrack) throw new Error('Your browser did not provide a screen video track.')
@@ -539,6 +539,9 @@ function App() {
       videoTrack.mediaStreamTrack.contentHint = preset.contentHint
       await liveKitRoom.localParticipant.publishTrack(videoTrack, {
         source: Track.Source.ScreenShare,
+        videoCodec: 'vp9',
+        backupCodec: { codec: 'h264' },
+        backupCodecPolicy: BackupCodecPolicy.PREFER_REGRESSION,
         screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: settings.frameRate },
         degradationPreference: preset.degradationPreference,
       })
@@ -682,7 +685,7 @@ function App() {
               <label className="screen-setting">
                 <span>QUALITY</span>
                 <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
-                  <option value="smooth">Smooth motion · 720p</option>
+                  <option value="smooth">Smooth motion · 1080p</option>
                   <option value="balanced">Balanced · 1080p</option>
                   <option value="sharp">Text clarity · 1080p</option>
                 </select>
