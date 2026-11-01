@@ -138,7 +138,8 @@ function estimateScreenShareBandwidth(settings: ScreenShareSettings): BandwidthE
 function recommendScreenSettings(uploadMbps: number): { quality: ScreenQuality; frameRate: ScreenFrameRate; contentProfile: ScreenContentProfile; label: string } {
   if (uploadMbps < 1.8) return { quality: '480p', frameRate: 30, contentProfile: 'motion', label: 'Low bandwidth · prioritize reliability' }
   if (uploadMbps < 4.2) return { quality: '720p', frameRate: 30, contentProfile: 'motion', label: 'Moderate upload · good everyday balance' }
-  if (uploadMbps < 9.5) return { quality: '1080p', frameRate: 30, contentProfile: 'motion', label: 'Strong upload · Full HD at 30 FPS' }
+  if (uploadMbps < 7.5) return { quality: '1080p', frameRate: 30, contentProfile: 'motion', label: 'Strong upload · Full HD at 30 FPS' }
+  if (uploadMbps < 10.5) return { quality: '1080p', frameRate: 30, contentProfile: 'motion', label: 'Strong upload · Full HD at 30 FPS' }
   return { quality: '1080p', frameRate: 60, contentProfile: 'motion', label: 'Very strong upload · Full HD at 60 FPS' }
 }
 
