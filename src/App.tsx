@@ -385,13 +385,27 @@ function App() {
     }).catch((issue) => setError(issue instanceof Error ? issue.message : 'Playback could not be synchronized.'))
   }
 
+  function exitScreenFullscreen() {
+    const stage = screenStageRef.current
+    const fullscreenElement = document.fullscreenElement
+    if (stage && fullscreenElement && (fullscreenElement === stage || stage.contains(fullscreenElement))) {
+      void document.exitFullscreen().catch(() => {
+        setError('Could not exit fullscreen. Press Escape to return to the room.')
+      })
+    }
+  }
+
   async function toggleFullscreen(target: HTMLElement | null) {
     try {
-      if (document.fullscreenElement) await document.exitFullscreen()
-      else if (target?.requestFullscreen) await target.requestFullscreen()
-      else setError('Fullscreen is not supported by this browser.')
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+      } else if (target?.isConnected && target.requestFullscreen) {
+        await target.requestFullscreen()
+      } else {
+        setError('Fullscreen is not available for this player right now.')
+      }
     } catch {
-      setError('The browser could not enter fullscreen. Check its site permissions and try again.')
+      setError('The browser could not change fullscreen mode. Press Escape to exit fullscreen.')
     }
   }
 
@@ -487,11 +501,15 @@ function App() {
         if (track.kind === Track.Kind.Audio) setScreenAudioTrack(track)
       })
       liveKitRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
-        if (track.kind === Track.Kind.Video) setScreenTrack(null)
+        if (track.kind === Track.Kind.Video) {
+          exitScreenFullscreen()
+          setScreenTrack(null)
+        }
         if (track.kind === Track.Kind.Audio) setScreenAudioTrack(null)
       })
       liveKitRoom.on(RoomEvent.Disconnected, () => {
         if (liveKitRef.current === liveKitRoom) liveKitRef.current = null
+        exitScreenFullscreen()
         setScreenConnected(false)
         setScreenSharing(false)
         setScreenActive(false)
@@ -600,6 +618,7 @@ function App() {
   }
 
   function stopScreenShare() {
+    exitScreenFullscreen()
     const liveKitRoom = liveKitRef.current
     if (liveKitRoom) {
       for (const publication of liveKitRoom.localParticipant.trackPublications.values()) {
@@ -701,7 +720,7 @@ function App() {
                 <span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>
                 <div className="screen-footer-actions">
                   <button className="local-audio" type="button" title={screenAudioMuted ? 'Unmute this device' : 'Mute this device'} aria-label={screenAudioMuted ? 'Unmute this device' : 'Mute this device'} onClick={() => setScreenAudioMuted((current) => !current)}>{screenAudioMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}<span>{screenAudioMuted ? 'Unmute me' : 'Mute me'}</span></button>
-                  <button className="icon-button media-fullscreen-button" type="button" disabled={!screenTrack} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => void toggleFullscreen(screenStageRef.current)}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+                  <button className="icon-button media-fullscreen-button" type="button" title={isFullscreen ? 'Exit fullscreen' : screenTrack ? 'Enter fullscreen' : 'Fullscreen unavailable'} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={() => { if (document.fullscreenElement || screenTrack) void toggleFullscreen(screenStageRef.current) }}>{isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
                   {screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenActive && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Choose what to share</button>}
                 </div>
               </div>
