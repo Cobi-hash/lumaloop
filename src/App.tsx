@@ -101,6 +101,34 @@ function participantCredential() {
   return created
 }
 
+function waitForSocketConnection(socket: Socket, timeoutMs = 75_000) {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      socket.off('connect', onConnect)
+      socket.off('connect_error', onConnectError)
+      if (error) reject(error)
+      else resolve()
+    }
+    const onConnect = () => finish()
+    // Render Free services can take around a minute to wake from idle.
+    // Keep waiting through transient connection errors while Socket.IO retries.
+    const onConnectError = () => undefined
+    const timeout = window.setTimeout(
+      () => finish(new Error('The watch-party server is taking longer than expected to wake up. Please try again.')),
+      timeoutMs,
+    )
+
+    socket.on('connect', onConnect)
+    socket.on('connect_error', onConnectError)
+    if (socket.connected) finish()
+    else socket.connect()
+  })
+}
+
 function emitAck<T>(socket: Socket, event: string, payload: unknown) {
   return new Promise<T>((resolve, reject) => {
     socket.timeout(7_000).emit(event, payload, (error: Error | null, response: T) => {
@@ -348,7 +376,6 @@ function App() {
         }
       })
       activeSocket.on('disconnect', () => setSocketConnected(false))
-      activeSocket.on('connect_error', () => setError('Could not reach the watch-party server. Try again in a moment.'))
       activeSocket.on('room:state', (nextRoom: RoomState) => {
         if (roomRef.current?.playback.sourceUrl !== nextRoom.playback.sourceUrl) {
           setMediaUrl(nextRoom.playback.sourceUrl)
@@ -363,15 +390,9 @@ function App() {
         sessionRef.current = null
         setError('The host removed you from this room.')
       })
-      activeSocket.connect()
     }
     try {
-      if (!activeSocket.connected) {
-        await new Promise<void>((resolve, reject) => {
-          activeSocket!.once('connect', () => resolve())
-          activeSocket!.once('connect_error', () => reject(new Error('Could not connect to the watch-party server.')))
-        })
-      }
+      if (!activeSocket.connected) await waitForSocketConnection(activeSocket)
       const payload = { displayName: name, participantId: id, authToken, ...(action === 'room:join' ? { code: roomCode.trim().toUpperCase() } : {}) }
       const result = await emitAck<AckResponse<RoomState>>(activeSocket, action, payload)
       if (!result.ok || !result.room || !result.participant) throw new Error(result.error ?? 'Could not enter that room.')
