@@ -330,9 +330,10 @@ function App() {
     const video = screenVideoRef.current
     if (!video || !p2pStream) return
     video.srcObject = p2pStream
+    video.muted = screenAudioMuted
     void video.play().catch(() => setScreenError('Press play in the screen-share player to start the stream.'))
     return () => { video.srcObject = null }
-  }, [p2pStream])
+  }, [p2pStream, screenAudioMuted])
 
   useEffect(() => {
     if (!screenTrack || !screenConnected) {
@@ -441,6 +442,7 @@ function App() {
         setRoom(nextRoom)
       })
       activeSocket.on('room:screen-state', (state: { active: boolean }) => setScreenActive(state.active))
+      activeSocket.on('p2p:mode', (state: { transport: ScreenTransport }) => setScreenTransport(state.transport))
       activeSocket.on('room:removed', () => {
         setRoom(null)
         setSession(null)
@@ -818,7 +820,7 @@ function App() {
               <pre>{screenTrack ? screenDiagnostics.length ? JSON.stringify(screenDiagnostics, null, 2) : 'Collecting WebRTC statistics…' : 'Waiting for an active screen-share video track…'}</pre>
             </details>
             {canControl && mediaControlsVisible && <div className="screen-settings-strip" aria-label="Screen-share settings">
-              <label className="screen-setting"><span>TRANSPORT (EXPERIMENTAL)</span><select value={screenTransport} disabled={screenSharing || screenActive} onChange={(event) => setScreenTransport(event.target.value as ScreenTransport)}><option value="livekit">LiveKit · Standard</option><option value="p2p">Direct P2P · Test</option></select></label>
+              <label className="screen-setting"><span>TRANSPORT (EXPERIMENTAL)</span><select value={screenTransport} disabled={screenSharing || screenActive} onChange={(event) => { const transport = event.target.value as ScreenTransport; setScreenTransport(transport); if (room && session) socketRef.current?.emit('p2p:mode', { code: room.code, participantId: session.participantId, transport }) }}><option value="livekit">LiveKit · Standard</option><option value="p2p">Direct P2P · Test</option></select></label>
               <label className="screen-setting">
                 <span>QUALITY</span>
                 <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
