@@ -8,15 +8,27 @@ export class DirectScreenShare {
   private pendingCandidates = new Map<string, RTCIceCandidateInit[]>()
   private stream: MediaStream | null = null
   private disposed = false
+  private readonly socket: Socket
+  private readonly code: string
+  private readonly participantId: string
+  private readonly onRemoteStream: (stream: MediaStream | null) => void
+  private readonly onError: (message: string) => void
+  private readonly onStopped: () => void
 
   constructor(
-    private readonly socket: Socket,
-    private readonly code: string,
-    private readonly participantId: string,
-    private readonly onRemoteStream: (stream: MediaStream | null) => void,
-    private readonly onError: (message: string) => void,
-    private readonly onStopped: () => void,
+    socket: Socket,
+    code: string,
+    participantId: string,
+    onRemoteStream: (stream: MediaStream | null) => void,
+    onError: (message: string) => void,
+    onStopped: () => void,
   ) {
+    this.socket = socket
+    this.code = code
+    this.participantId = participantId
+    this.onRemoteStream = onRemoteStream
+    this.onError = onError
+    this.onStopped = onStopped
     socket.on('p2p:request', this.handleRequest)
     socket.on('p2p:signal', this.handleSignal)
   }
