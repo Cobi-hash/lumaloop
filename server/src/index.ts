@@ -29,6 +29,7 @@ export function createWatchPartyServer() {
   })
   let registry: RoomRegistry
   const activeScreenSharers = new Map<string, string>()
+  const screenTransports = new Map<string, 'livekit' | 'p2p'>()
   registry = new RoomRegistry(30_000, (code) => {
     if (io.sockets.adapter.rooms.has(code)) io.to(code).emit('room:state', registry.snapshot(code))
   })
@@ -124,7 +125,7 @@ export function createWatchPartyServer() {
       if (typeof input.code !== 'string' || typeof input.participantId !== 'string') return
       if (input.transport !== 'livekit' && input.transport !== 'p2p') return
       if (!socketOwnsParticipant(input.code, input.participantId, socket.id) || !registry.canPublishScreen(input.code, input.participantId)) return
-      io.to(input.code.toUpperCase()).emit('p2p:mode', { transport: input.transport })
+      screenTransports.set(input.code.toUpperCase(), input.transport)\n      io.to(input.code.toUpperCase()).emit('p2p:mode', { transport: input.transport })
     })
 
     socket.on('p2p:request', (payload: unknown) => {
