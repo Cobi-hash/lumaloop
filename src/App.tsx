@@ -32,7 +32,7 @@ type Role = 'host' | 'cohost' | 'guest'
 type Mode = 'video' | 'screen'
 type ScreenTrackFactory = typeof import('livekit-client')['createLocalScreenTracks']
 type ScreenTracksPromise = ReturnType<ScreenTrackFactory>
-type ScreenQuality = 'auto' | '480p' | '720p' | '1080p' | '1440p'
+type ScreenQuality = 'auto' | '480p' | '720p' | '1080p'
 type ScreenFrameRate = 30 | 60
 type ScreenContentProfile = 'auto' | 'detail' | 'motion'
 
@@ -46,11 +46,10 @@ interface ScreenShareSettings {
 const SCREEN_SETTINGS_KEY = 'lumaloop.screenShareSettings'
 const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'auto', frameRate: 30, contentProfile: 'auto', shareAudio: true }
 const SCREEN_QUALITY_PRESETS = {
-  auto: { label: 'Auto · up to 1440p', width: 2560, height: 1440, maxBitrate: 6_000_000 },
-  '480p': { label: '480p · low bandwidth', width: 854, height: 480, maxBitrate: 900_000 },
-  '720p': { label: '720p · balanced', width: 1280, height: 720, maxBitrate: 2_000_000 },
-  '1080p': { label: '1080p · Full HD', width: 1920, height: 1080, maxBitrate: 3_800_000 },
-  '1440p': { label: '1440p · 2K detail', width: 2560, height: 1440, maxBitrate: 6_000_000 },
+  auto: { label: 'Auto · up to 1080p', width: 1920, height: 1080, maxBitrate: 3_600_000 },
+  '480p': { label: '480p · low bandwidth', width: 854, height: 480, maxBitrate: 800_000 },
+  '720p': { label: '720p · balanced', width: 1280, height: 720, maxBitrate: 1_800_000 },
+  '1080p': { label: '1080p · Full HD', width: 1920, height: 1080, maxBitrate: 3_600_000 },
 } as const
 
 function requestedScreenResolution(preset: typeof SCREEN_QUALITY_PRESETS[ScreenQuality], frameRate: ScreenFrameRate) {
@@ -69,7 +68,7 @@ function readScreenShareSettings(): ScreenShareSettings {
   try {
     const saved = JSON.parse(localStorage.getItem(SCREEN_SETTINGS_KEY) ?? 'null') as Partial<ScreenShareSettings> | null
     return {
-      quality: saved?.quality === '480p' || saved?.quality === '720p' || saved?.quality === '1080p' || saved?.quality === '1440p' ? saved.quality : 'auto',
+      quality: saved?.quality === '480p' || saved?.quality === '720p' || saved?.quality === '1080p' ? saved.quality : 'auto',
       frameRate: saved?.frameRate === 60 ? 60 : 30,
       contentProfile: saved?.contentProfile === 'detail' || saved?.contentProfile === 'motion' ? saved.contentProfile : 'auto',
       shareAudio: typeof saved?.shareAudio === 'boolean' ? saved.shareAudio : DEFAULT_SCREEN_SETTINGS.shareAudio,
@@ -578,23 +577,30 @@ function App() {
   ) {
     try {
       const tracks = await pendingScreenTracks
-      const { Track } = await import('livekit-client')
+      const { BackupCodecPolicy, Track } = await import('livekit-client')
       const videoTrack = tracks.find((track) => track.kind === Track.Kind.Video)
       const audioTrack = tracks.find((track) => track.kind === Track.Kind.Audio)
       if (!videoTrack) throw new Error('Your browser did not provide a screen video track.')
       const preset = SCREEN_QUALITY_PRESETS[settings.quality]
-      // Keep codec selection with LiveKit/browser negotiation for broad browser
-      // compatibility. A single forced VP9 + backup track can add complexity and
-      // duplicate publishing without guaranteeing a better result on every device.
+      // VP9 SVC sends one scalable stream with spatial and temporal layers.
+      // This avoids uploading three independent simulcast encodes. VP8 is used
+      // as a compatibility fallback when a subscriber cannot decode VP9.
       videoTrack.mediaStreamTrack.contentHint = screenContentHint(settings.contentProfile)
       const frameRateBitrate = settings.frameRate === 60 ? 1.25 : 1
       await liveKitRoom.localParticipant.publishTrack(videoTrack, {
         source: Track.Source.ScreenShare,
+        videoCodec: 'vp9',
+        backupCodec: { codec: 'vp8' },
+        backupCodecPolicy: BackupCodecPolicy.PREFER_REGRESSION,
+        simulcast: false,
         screenShareEncoding: {
           maxBitrate: Math.round(preset.maxBitrate * frameRateBitrate),
           maxFramerate: settings.frameRate,
         },
-        degradationPreference: 'balanced',
+        scalabilityMode: 'L3T3_KEY',
+        // Preserve the captured pixel dimensions under congestion; the scalable
+        // stream can shed temporal layers before text/detail is downscaled.
+        degradationPreference: 'maintain-resolution',
       })
       if (audioTrack) {
         await liveKitRoom.localParticipant.publishTrack(audioTrack, { source: Track.Source.ScreenShareAudio })
@@ -737,11 +743,10 @@ function App() {
               <label className="screen-setting">
                 <span>QUALITY</span>
                 <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
-                  <option value="auto">Auto · up to 1440p</option>
+                  <option value="auto">Auto · up to 1080p</option>
                   <option value="480p">480p · low bandwidth</option>
                   <option value="720p">720p · balanced</option>
                   <option value="1080p">1080p · Full HD</option>
-                  <option value="1440p">1440p · 2K detail</option>
                 </select>
               </label>
               <label className="screen-setting">
@@ -763,7 +768,7 @@ function App() {
                 <input type="checkbox" checked={screenShareSettings.shareAudio} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ shareAudio: event.target.checked })} />
                 <span>Share available audio</span>
               </label>
-              <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : 'Auto uses a balanced motion hint. Choose Detail for readable text or Motion for games and video. 60 FPS uses more bandwidth; 30 FPS is the stable default.'}</p>
+              <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : '1080p is the maximum. The stream prioritizes keeping text sharp under congestion; on weak connections it may reduce frame rate rather than blur the image. 30 FPS is recommended; use 60 FPS for fast games if your upload can sustain it.'}</p>
             </div>}
             </div>
           )}
