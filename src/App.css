@@ -467,6 +467,29 @@
 .stop-share { min-height: 32px; padding: 0 11px; color: #ffe3db; border-color: rgba(236, 119, 94, .46); background: rgba(236, 119, 94, .09); font-size: 10px; }
 .screen-limit-note { display: flex; align-items: center; gap: 7px; margin: 12px 0 0; color: #8e988c; font-size: 10px; }
 .screen-limit-note svg { color: var(--lime); }
+.screen-diagnostics {
+  margin-top: 12px;
+  padding: 11px 13px;
+  border: 1px solid #394339;
+  border-radius: 3px;
+  background: #171d18;
+  color: #c4cec0;
+  font-size: 11px;
+}
+.screen-diagnostics summary { color: var(--lime); cursor: pointer; font-weight: 650; }
+.screen-diagnostics p { margin: 8px 0; color: #929e8e; line-height: 1.45; }
+.screen-diagnostics pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 2px;
+  background: #0d110e;
+  color: #d8e1d4;
+  font: 10px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .screen-error { margin-top: 10px; }
 
 .inline-error,
