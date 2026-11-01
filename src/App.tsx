@@ -32,7 +32,7 @@ type Role = 'host' | 'cohost' | 'guest'
 type Mode = 'video' | 'screen'
 type ScreenTrackFactory = typeof import('livekit-client')['createLocalScreenTracks']
 type ScreenTracksPromise = ReturnType<ScreenTrackFactory>
-type ScreenQuality = 'auto' | '480p' | '720p' | '1080p' | '1440p'
+type ScreenQuality = 'auto' | '480p' | '720p' | '1080p'
 type ScreenFrameRate = 30 | 60
 type ScreenContentProfile = 'auto' | 'detail' | 'motion'
 
