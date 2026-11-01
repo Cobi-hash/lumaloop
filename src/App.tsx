@@ -8,6 +8,8 @@ import {
   RoomEvent,
   stopPublishedScreenShare,
   Track,
+  type ScreenContentProfile,
+  type ScreenFrameRate,
   type ScreenQuality,
   type ScreenShareSettings,
   type ScreenTracksPromise,
