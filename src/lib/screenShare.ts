@@ -27,9 +27,9 @@ export const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = {
 }
 
 const SCREEN_QUALITY_PRESETS = {
-  auto: { width: 1920, height: 1080, maxBitrate: 3_600_000 },
-  '480p': { width: 854, height: 480, maxBitrate: 800_000 },
-  '720p': { width: 1280, height: 720, maxBitrate: 1_800_000 },
+  auto: { width: 1920, height: 1080, maxBitrate: 4_500_000 },
+  '480p': { width: 854, height: 480, maxBitrate: 1_000_000 },
+  '720p': { width: 1280, height: 720, maxBitrate: 2_500_000 },
   '1080p': { width: 1920, height: 1080, maxBitrate: 3_600_000 },
 } as const
 
@@ -92,6 +92,7 @@ export async function publishScreenCapture(
   }
 
   const preset = SCREEN_QUALITY_PRESETS[settings.quality]
+  const publishedTracks: typeof tracks = []
   videoTrack.mediaStreamTrack.contentHint = settings.contentProfile === 'detail' ? 'detail' : 'motion'
 
   // Movies normally run at 24/30 fps. Use one VP9 SVC stream to provide
@@ -109,26 +110,24 @@ export async function publishScreenCapture(
         maxFramerate: settings.frameRate,
       },
       scalabilityMode: 'L3T3_KEY',
-      // For movie content, preserve spatial detail first; temporal layers can
-      // be reduced before the image is downscaled when the network is strained.
-      degradationPreference: 'maintain-resolution',
+      // Balanced degradation avoids forcing either extreme: preserve readable
+      // detail while reducing frame rate/resolution gradually under congestion.
+      degradationPreference: 'balanced',
     })
+    publishedTracks.push(videoTrack)
 
     if (audioTrack) {
       await room.localParticipant.publishTrack(audioTrack, {
         source: Track.Source.ScreenShareAudio,
       })
+      publishedTracks.push(audioTrack)
     }
   } catch (error) {
+    for (const track of publishedTracks) {
+      await room.localParticipant.unpublishTrack(track, true).catch(() => track.stop())
+    }
     for (const track of tracks) {
-      const publication = room.localParticipant.getTrackPublication(
-        track.kind === Track.Kind.Video ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
-      )
-      if (publication?.track) {
-        await room.localParticipant.unpublishTrack(publication.track, true).catch(() => undefined)
-      } else {
-        track.stop()
-      }
+      if (!publishedTracks.includes(track)) track.stop()
     }
     throw error
   }
