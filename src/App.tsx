@@ -178,17 +178,28 @@ function App() {
     const sync = () => {
       if (!video.readyState) return
       const target = playbackTime + (playbackIsPlaying ? Math.max(0, Date.now() - playbackUpdatedAt) / 1000 : 0)
-      if (Math.abs(video.currentTime - target) > 1.25) {
+      const drift = target - video.currentTime
+      if (Math.abs(drift) > 1.25) {
+        // Large drift needs a hard correction; small drift is corrected with
+        // temporary playback-rate nudging to avoid visible seek jumps.
         syncingSeekRef.current = true
         try {
           video.currentTime = target
-          window.setTimeout(() => { syncingSeekRef.current = false }, 1_500)
+          video.playbackRate = 1
+          window.setTimeout(() => { syncingSeekRef.current = false }, 800)
         } catch {
           syncingSeekRef.current = false
         }
+      } else if (playbackIsPlaying && Math.abs(drift) > 0.12) {
+        video.playbackRate = Math.max(0.96, Math.min(1.04, 1 + drift * 0.035))
+      } else {
+        video.playbackRate = 1
       }
       if (playbackIsPlaying && video.paused) void video.play().catch(() => setMediaError('Playback was blocked by the browser. Press play on your device to continue.'))
-      if (!playbackIsPlaying && !video.paused) video.pause()
+      if (!playbackIsPlaying && !video.paused) {
+        video.playbackRate = 1
+        video.pause()
+      }
     }
     sync()
     const timer = window.setInterval(sync, 1_500)
@@ -216,7 +227,16 @@ function App() {
           setMediaError('This browser does not support HLS playback.')
           return
         }
-        hls = new Hls({ enableWorker: true, lowLatencyMode: false })
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          capLevelToPlayerSize: true,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          backBufferLength: 30,
+          abrBandWidthFactor: 0.8,
+          abrBandWidthUpFactor: 0.7,
+        })
         hls.loadSource(source)
         hls.attachMedia(video)
         hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -442,7 +462,6 @@ function App() {
     if (!room || !session) return
     setScreenError('')
     try {
-      const TrackKind = Track
       if (liveKitRef.current) {
         if (publish && pendingScreenTracks) await publishScreenCapture(liveKitRef.current, pendingScreenTracks, settings)
         return
@@ -456,11 +475,11 @@ function App() {
       if (!response.ok || !credentials.url || !credentials.token) throw new Error(credentials.error ?? 'Screen sharing is not available.')
       const liveKitRoom = createScreenShareRoom()
       liveKitRoom.on(RoomEvent.TrackSubscribed, (track) => {
-        if (track.kind === TrackKind.Kind.Video) {
+        if (track.kind === Track.Kind.Video) {
           setScreenTrack(track)
           setMode('screen')
         }
-        if (track.kind === TrackKind.Kind.Audio) setScreenAudioTrack(track)
+        if (track.kind === Track.Kind.Audio) setScreenAudioTrack(track)
       })
       liveKitRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
         if (track.kind === Track.Kind.Video) {
