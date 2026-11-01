@@ -119,6 +119,14 @@ export function createWatchPartyServer() {
       io.to(target.socketId).emit('p2p:signal', { from: input.participantId, signal: input.signal })
     })
 
+    socket.on('p2p:mode', (payload: unknown) => {
+      const input = (payload ?? {}) as { code?: unknown; participantId?: unknown; transport?: unknown }
+      if (typeof input.code !== 'string' || typeof input.participantId !== 'string') return
+      if (input.transport !== 'livekit' && input.transport !== 'p2p') return
+      if (!socketOwnsParticipant(input.code, input.participantId, socket.id) || !registry.canPublishScreen(input.code, input.participantId)) return
+      io.to(input.code.toUpperCase()).emit('p2p:mode', { transport: input.transport })
+    })
+
     socket.on('p2p:request', (payload: unknown) => {
       const input = (payload ?? {}) as { code?: unknown; participantId?: unknown }
       if (typeof input.code !== 'string' || typeof input.participantId !== 'string') return
