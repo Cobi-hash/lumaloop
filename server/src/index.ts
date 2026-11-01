@@ -29,6 +29,7 @@ export function createWatchPartyServer() {
   })
   let registry: RoomRegistry
   const activeScreenSharers = new Map<string, string>()
+  const screenTransports = new Map<string, 'livekit' | 'p2p'>()
   registry = new RoomRegistry(30_000, (code) => {
     if (io.sockets.adapter.rooms.has(code)) io.to(code).emit('room:state', registry.snapshot(code))
   })
@@ -104,6 +105,38 @@ export function createWatchPartyServer() {
       } catch (error) {
         acknowledge?.({ ok: false, error: errorMessage(error) })
       }
+    })
+
+    // Experimental direct WebRTC signaling. Only signaling data is relayed; media is peer-to-peer.
+    socket.on('p2p:signal', (payload: unknown) => {
+      const input = (payload ?? {}) as { code?: unknown; participantId?: unknown; targetId?: unknown; signal?: unknown }
+      if (typeof input.code !== 'string' || typeof input.participantId !== 'string' || typeof input.targetId !== 'string' || !input.signal) return
+      if (!socketOwnsParticipant(input.code, input.participantId, socket.id)) return
+      const sender = registry.participant(input.code, input.participantId)
+      const target = registry.participant(input.code, input.targetId)
+      if (!sender?.connected || !target?.connected || !target.socketId) return
+      const signal = input.signal as { type?: unknown }
+      if (signal.type === 'offer' && !registry.canPublishScreen(input.code, input.participantId)) return
+      io.to(target.socketId).emit('p2p:signal', { from: input.participantId, signal: input.signal })
+    })
+
+    socket.on('p2p:mode', (payload: unknown) => {
+      const input = (payload ?? {}) as { code?: unknown; participantId?: unknown; transport?: unknown }
+      if (typeof input.code !== 'string' || typeof input.participantId !== 'string') return
+      if (input.transport !== 'livekit' && input.transport !== 'p2p') return
+      if (!socketOwnsParticipant(input.code, input.participantId, socket.id) || !registry.canPublishScreen(input.code, input.participantId)) return
+      screenTransports.set(input.code.toUpperCase(), input.transport)\n      io.to(input.code.toUpperCase()).emit('p2p:mode', { transport: input.transport })
+    })
+
+    socket.on('p2p:request', (payload: unknown) => {
+      const input = (payload ?? {}) as { code?: unknown; participantId?: unknown }
+      if (typeof input.code !== 'string' || typeof input.participantId !== 'string') return
+      if (!socketOwnsParticipant(input.code, input.participantId, socket.id)) return
+      const guest = registry.participant(input.code, input.participantId)
+      if (!guest?.connected) return
+      const host = registry.snapshot(input.code).participants.find((participant) => participant.role === 'host' || participant.role === 'cohost')
+      const hostParticipant = host ? registry.participant(input.code, host.id) : undefined
+      if (hostParticipant?.socketId) io.to(hostParticipant.socketId).emit('p2p:request', { participantId: input.participantId })
     })
 
     socket.on('room:playback', (payload: unknown, acknowledge?: (result: unknown) => void) => {

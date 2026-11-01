@@ -40,10 +40,12 @@ import {
   X,
 } from 'lucide-react'
 import { io, type Socket } from 'socket.io-client'
+import { DirectScreenShare } from './lib/directScreenShare'
 import './App.css'
 
 type Role = 'host' | 'cohost' | 'guest'
 type Mode = 'video' | 'screen'
+type ScreenTransport = 'livekit' | 'p2p'
 interface Participant {
   id: string
   displayName: string
@@ -192,6 +194,8 @@ function App() {
   const [mediaError, setMediaError] = useState('')
   const [screenError, setScreenError] = useState('')
   const [screenConnected, setScreenConnected] = useState(false)
+  const [screenTransport, setScreenTransport] = useState<ScreenTransport>('livekit')
+  const [p2pStream, setP2pStream] = useState<MediaStream | null>(null)
   const [screenSharing, setScreenSharing] = useState(false)
   const [screenActive, setScreenActive] = useState(false)
   const [screenShareSettings, setScreenShareSettings] = useState(readScreenShareSettings)
@@ -212,6 +216,7 @@ function App() {
   const screenVideoRef = useRef<HTMLVideoElement>(null)
   const screenAudioRef = useRef<HTMLAudioElement>(null)
   const liveKitRef = useRef<LiveKitRoomType | null>(null)
+  const p2pRef = useRef<DirectScreenShare | null>(null)
   
   const self = room?.participants.find((participant) => participant.id === session?.participantId)
   const canControl = self?.role === 'host' || self?.role === 'cohost'
@@ -322,6 +327,15 @@ function App() {
   }, [screenTrack])
 
   useEffect(() => {
+    const video = screenVideoRef.current
+    if (!video || !p2pStream) return
+    video.srcObject = p2pStream
+    video.muted = screenAudioMuted
+    void video.play().catch(() => setScreenError('Press play in the screen-share player to start the stream.'))
+    return () => { video.srcObject = null }
+  }, [p2pStream, screenAudioMuted])
+
+  useEffect(() => {
     if (!screenTrack || !screenConnected) {
       setScreenDiagnostics([])
       return
@@ -377,6 +391,7 @@ function App() {
   useEffect(() => () => {
     if (mediaControlsTimerRef.current !== null) window.clearTimeout(mediaControlsTimerRef.current)
     liveKitRef.current?.disconnect()
+    p2pRef.current?.stop()
     socketRef.current?.disconnect()
   }, [])
 
@@ -426,7 +441,8 @@ function App() {
         }
         setRoom(nextRoom)
       })
-      activeSocket.on('room:screen-state', (state: { active: boolean }) => setScreenActive(state.active))
+      activeSocket.on('room:screen-state', (state: { active: boolean }) => { setScreenActive(state.active); if (state.active && screenTransport === 'p2p' && !canControl) p2pRef.current?.requestStream() })
+      activeSocket.on('p2p:mode', (state: { transport: ScreenTransport }) => { setScreenTransport(state.transport); liveKitRef.current?.disconnect(); liveKitRef.current = null; setScreenConnected(false); setScreenTrack(null); setScreenAudioTrack(null) })
       activeSocket.on('room:removed', () => {
         setRoom(null)
         setSession(null)
@@ -540,6 +556,9 @@ function App() {
     sessionRef.current = null
     liveKitRef.current?.disconnect()
     liveKitRef.current = null
+    p2pRef.current?.stop()
+    p2pRef.current = null
+    setP2pStream(null)
     setSocketConnected(false)
     setScreenConnected(false)
     setScreenSharing(false)
@@ -553,12 +572,21 @@ function App() {
     history.replaceState(null, '', location.pathname)
   }
 
+  function connectDirectScreenShare() {
+    if (!room || !session || !socketRef.current || p2pRef.current) return
+    const direct = new DirectScreenShare(socketRef.current, room.code, session.participantId, setP2pStream, setScreenError, () => { setScreenSharing(false); setScreenActive(false); setScreenConnected(false); socketRef.current?.emit('screen:active', { code: room.code, participantId: session.participantId, active: false }) })
+    p2pRef.current = direct
+    setScreenConnected(true)
+    if (!canControl) direct.requestStream()
+  }
+
   async function connectScreenShare(
     publish: boolean,
     pendingScreenTracks?: ScreenTracksPromise,
     settings: ScreenShareSettings = screenShareSettings,
   ) {
     if (!room || !session) return
+    if (screenTransport === 'p2p') { connectDirectScreenShare(); return }
     setScreenError('')
     try {
       if (liveKitRef.current) {
@@ -621,6 +649,17 @@ function App() {
 
   function startScreenShare() {
     if (!room || !session) return
+    if (screenTransport === 'p2p') {
+      setScreenError('')
+      connectDirectScreenShare()
+      const direct = p2pRef.current
+      if (!direct) return
+      void direct.startCapture().then(() => {
+        setScreenSharing(true); setScreenActive(true); setMode('screen')
+        socketRef.current?.emit('screen:active', { code: room.code, participantId: session.participantId, active: true })
+      }).catch((issue) => setScreenError(screenCaptureError(issue)))
+      return
+    }
     setScreenError('')
     const settings = { ...screenShareSettings }
     try {
@@ -667,6 +706,12 @@ function App() {
 
   function stopScreenShare() {
     exitScreenFullscreen()
+    if (screenTransport === 'p2p') {
+      p2pRef.current?.stop(); p2pRef.current = null; setP2pStream(null)
+      setScreenSharing(false); setScreenConnected(false); setScreenActive(false)
+      socketRef.current?.emit('screen:active', { code: room?.code, participantId: session?.participantId, active: false })
+      return
+    }
     const liveKitRoom = liveKitRef.current
     if (liveKitRoom) stopPublishedScreenShare(liveKitRoom)
     socketRef.current?.emit('screen:active', { code: room?.code, participantId: session?.participantId, active: false })
@@ -757,7 +802,7 @@ function App() {
           ) : (
             <div className="screen-experience" onPointerEnter={revealMediaControls} onPointerMove={revealMediaControls} onPointerDown={revealMediaControls} onPointerLeave={scheduleMediaControlsHide} onFocusCapture={revealMediaControls}>
             <div className="screen-stage" ref={screenStageRef}>
-              {screenTrack ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={screenAudioMuted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? canControl ? 'Open your video source in another tab, then choose it in the share picker. Enable Share tab audio if available.' : 'The host or co-host can start sharing at any time.' : 'Connect to the room screen, then choose a browser tab, window, or display to share.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
+              {(screenTrack || p2pStream) ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={screenAudioMuted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? canControl ? 'Open your video source in another tab, then choose it in the share picker. Enable Share tab audio if available.' : 'The host or co-host can start sharing at any time.' : 'Connect to the room screen, then choose a browser tab, window, or display to share.'}</p>{(!screenConnected || (screenTransport === 'p2p' && !canControl && !p2pStream)) && <button className="secondary-button" type="button" onClick={() => { if (screenTransport === 'p2p') connectDirectScreenShare(); else void connectScreenShare(false) }}><MonitorPlay size={16} /> {screenTransport === 'p2p' ? 'Connect / retry direct stream' : 'Connect to screen'}</button>}</div>}
               <div className={`screen-stage-footer media-controls-overlay ${mediaControlsVisible ? 'controls-visible' : 'controls-hidden'}`} aria-hidden={!mediaControlsVisible}>
                 <span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>
                 <div className="screen-footer-actions">
@@ -775,6 +820,7 @@ function App() {
               <pre>{screenTrack ? screenDiagnostics.length ? JSON.stringify(screenDiagnostics, null, 2) : 'Collecting WebRTC statistics…' : 'Waiting for an active screen-share video track…'}</pre>
             </details>
             {canControl && mediaControlsVisible && <div className="screen-settings-strip" aria-label="Screen-share settings">
+              <label className="screen-setting"><span>TRANSPORT (EXPERIMENTAL)</span><select value={screenTransport} disabled={screenSharing || screenActive} onChange={(event) => { const transport = event.target.value as ScreenTransport; setScreenTransport(transport); if (room && session) socketRef.current?.emit('p2p:mode', { code: room.code, participantId: session.participantId, transport }) }}><option value="livekit">LiveKit · Standard</option><option value="p2p">Direct P2P · Test</option></select></label>
               <label className="screen-setting">
                 <span>QUALITY</span>
                 <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
