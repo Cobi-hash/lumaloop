@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Room as LiveKitRoomType, Track as LiveKitTrackType } from 'livekit-client'
 import {
+  createScreenShareRoom,
+  publishScreenCapture as publishScreenTracks,
+  readScreenShareSettings,
+  requestScreenCapture,
+  RoomEvent,
+  stopPublishedScreenShare,
+  Track,
+  type ScreenContentProfile,
+  type ScreenFrameRate,
+  type ScreenQuality,
+  type ScreenShareSettings,
+  type ScreenTracksPromise,
+} from './lib/screenShare'
+import {
   ArrowUpRight,
   Check,
   ChevronDown,
@@ -30,54 +44,6 @@ import './App.css'
 
 type Role = 'host' | 'cohost' | 'guest'
 type Mode = 'video' | 'screen'
-type ScreenTrackFactory = typeof import('livekit-client')['createLocalScreenTracks']
-type ScreenTracksPromise = ReturnType<ScreenTrackFactory>
-type ScreenQuality = 'auto' | '480p' | '720p' | '1080p'
-type ScreenFrameRate = 30 | 60
-type ScreenContentProfile = 'auto' | 'detail' | 'motion'
-
-interface ScreenShareSettings {
-  quality: ScreenQuality
-  frameRate: ScreenFrameRate
-  contentProfile: ScreenContentProfile
-  shareAudio: boolean
-}
-
-const SCREEN_SETTINGS_KEY = 'lumaloop.screenShareSettings'
-const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'auto', frameRate: 30, contentProfile: 'auto', shareAudio: true }
-const SCREEN_QUALITY_PRESETS = {
-  auto: { label: 'Auto · up to 1080p', width: 1920, height: 1080, maxBitrate: 3_600_000 },
-  '480p': { label: '480p · low bandwidth', width: 854, height: 480, maxBitrate: 800_000 },
-  '720p': { label: '720p · balanced', width: 1280, height: 720, maxBitrate: 1_800_000 },
-  '1080p': { label: '1080p · Full HD', width: 1920, height: 1080, maxBitrate: 3_600_000 },
-} as const
-
-function requestedScreenResolution(preset: typeof SCREEN_QUALITY_PRESETS[ScreenQuality], frameRate: ScreenFrameRate) {
-  // These are capture constraints, not assumptions about window.screen. The
-  // browser applies them to the surface the user actually chooses in the picker.
-  return { width: preset.width, height: preset.height, frameRate }
-}
-
-function screenContentHint(profile: ScreenContentProfile): 'detail' | 'motion' {
-  // There is no reliable browser API for classifying arbitrary shared content.
-  // Auto therefore uses a balanced motion hint; users can choose Detail for text/UI.
-  return profile === 'detail' ? 'detail' : 'motion'
-}
-
-function readScreenShareSettings(): ScreenShareSettings {
-  try {
-    const saved = JSON.parse(localStorage.getItem(SCREEN_SETTINGS_KEY) ?? 'null') as Partial<ScreenShareSettings> | null
-    return {
-      quality: saved?.quality === '480p' || saved?.quality === '720p' || saved?.quality === '1080p' ? saved.quality : 'auto',
-      frameRate: saved?.frameRate === 60 ? 60 : 30,
-      contentProfile: saved?.contentProfile === 'detail' || saved?.contentProfile === 'motion' ? saved.contentProfile : 'auto',
-      shareAudio: typeof saved?.shareAudio === 'boolean' ? saved.shareAudio : DEFAULT_SCREEN_SETTINGS.shareAudio,
-    }
-  } catch {
-    return DEFAULT_SCREEN_SETTINGS
-  }
-}
-
 interface Participant {
   id: string
   displayName: string
@@ -185,8 +151,7 @@ function App() {
   const screenVideoRef = useRef<HTMLVideoElement>(null)
   const screenAudioRef = useRef<HTMLAudioElement>(null)
   const liveKitRef = useRef<LiveKitRoomType | null>(null)
-  const screenTrackFactoryRef = useRef<ScreenTrackFactory | null>(null)
-
+  
   const self = room?.participants.find((participant) => participant.id === session?.participantId)
   const canControl = self?.role === 'host' || self?.role === 'cohost'
   const isHost = self?.role === 'host'
@@ -216,17 +181,28 @@ function App() {
     const sync = () => {
       if (!video.readyState) return
       const target = playbackTime + (playbackIsPlaying ? Math.max(0, Date.now() - playbackUpdatedAt) / 1000 : 0)
-      if (Math.abs(video.currentTime - target) > 1.25) {
+      const drift = target - video.currentTime
+      if (Math.abs(drift) > 1.25) {
+        // Large drift needs a hard correction; small drift is corrected with
+        // temporary playback-rate nudging to avoid visible seek jumps.
         syncingSeekRef.current = true
         try {
           video.currentTime = target
-          window.setTimeout(() => { syncingSeekRef.current = false }, 1_500)
+          video.playbackRate = 1
+          window.setTimeout(() => { syncingSeekRef.current = false }, 800)
         } catch {
           syncingSeekRef.current = false
         }
+      } else if (playbackIsPlaying && Math.abs(drift) > 0.12) {
+        video.playbackRate = Math.max(0.96, Math.min(1.04, 1 + drift * 0.035))
+      } else {
+        video.playbackRate = 1
       }
       if (playbackIsPlaying && video.paused) void video.play().catch(() => setMediaError('Playback was blocked by the browser. Press play on your device to continue.'))
-      if (!playbackIsPlaying && !video.paused) video.pause()
+      if (!playbackIsPlaying && !video.paused) {
+        video.playbackRate = 1
+        video.pause()
+      }
     }
     sync()
     const timer = window.setInterval(sync, 1_500)
@@ -254,7 +230,16 @@ function App() {
           setMediaError('This browser does not support HLS playback.')
           return
         }
-        hls = new Hls({ enableWorker: true, lowLatencyMode: false })
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          capLevelToPlayerSize: true,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          backBufferLength: 30,
+          abrBandWidthFactor: 0.8,
+          abrBandWidthUpFactor: 0.7,
+        })
         hls.loadSource(source)
         hls.attachMedia(video)
         hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -480,8 +465,6 @@ function App() {
     if (!room || !session) return
     setScreenError('')
     try {
-      const { Room: LiveKitRoom, RoomEvent, Track, createLocalScreenTracks } = await import('livekit-client')
-      screenTrackFactoryRef.current = createLocalScreenTracks
       if (liveKitRef.current) {
         if (publish && pendingScreenTracks) await publishScreenCapture(liveKitRef.current, pendingScreenTracks, settings)
         return
@@ -493,7 +476,7 @@ function App() {
       })
       const credentials = await response.json() as { url?: string; token?: string; error?: string }
       if (!response.ok || !credentials.url || !credentials.token) throw new Error(credentials.error ?? 'Screen sharing is not available.')
-      const liveKitRoom = new LiveKitRoom({ adaptiveStream: true, dynacast: true })
+      const liveKitRoom = createScreenShareRoom()
       liveKitRoom.on(RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === Track.Kind.Video) {
           setScreenTrack(track)
@@ -522,8 +505,8 @@ function App() {
           active: false,
         })
       })
-      await liveKitRoom.connect(credentials.url, credentials.token)
       liveKitRef.current = liveKitRoom
+      await liveKitRoom.connect(credentials.url, credentials.token)
       setScreenConnected(true)
       for (const remote of liveKitRoom.remoteParticipants.values()) {
         for (const publication of remote.trackPublications.values()) {
@@ -542,26 +525,11 @@ function App() {
 
   function startScreenShare() {
     if (!room || !session) return
-    const createLocalScreenTracks = screenTrackFactoryRef.current
-    if (!createLocalScreenTracks) {
-      setScreenError('Screen sharing is still connecting. Try again in a moment.')
-      void connectScreenShare(false)
-      return
-    }
-
     setScreenError('')
     const settings = { ...screenShareSettings }
-    const preset = SCREEN_QUALITY_PRESETS[settings.quality]
     try {
-      const pendingScreenTracks = createLocalScreenTracks({
-        audio: settings.shareAudio,
-        video: { displaySurface: 'browser' },
-        selfBrowserSurface: 'exclude',
-        surfaceSwitching: 'include',
-        resolution: requestedScreenResolution(preset, settings.frameRate),
-        contentHint: screenContentHint(settings.contentProfile),
-        systemAudio: settings.shareAudio ? 'include' : 'exclude',
-      })
+      // Start native capture immediately in the click gesture; network setup runs after.
+      const pendingScreenTracks = requestScreenCapture(settings)
       const liveKitRoom = liveKitRef.current
       if (liveKitRoom) void publishScreenCapture(liveKitRoom, pendingScreenTracks, settings)
       else void connectScreenShare(true, pendingScreenTracks, settings)
@@ -576,37 +544,9 @@ function App() {
     settings: ScreenShareSettings,
   ) {
     try {
-      const tracks = await pendingScreenTracks
-      const { BackupCodecPolicy, Track } = await import('livekit-client')
-      const videoTrack = tracks.find((track) => track.kind === Track.Kind.Video)
-      const audioTrack = tracks.find((track) => track.kind === Track.Kind.Audio)
-      if (!videoTrack) throw new Error('Your browser did not provide a screen video track.')
-      const preset = SCREEN_QUALITY_PRESETS[settings.quality]
-      // VP9 SVC sends one scalable stream with spatial and temporal layers.
-      // This avoids uploading three independent simulcast encodes. VP8 is used
-      // as a compatibility fallback when a subscriber cannot decode VP9.
-      videoTrack.mediaStreamTrack.contentHint = screenContentHint(settings.contentProfile)
-      const frameRateBitrate = settings.frameRate === 60 ? 1.25 : 1
-      await liveKitRoom.localParticipant.publishTrack(videoTrack, {
-        source: Track.Source.ScreenShare,
-        videoCodec: 'vp9',
-        backupCodec: { codec: 'vp8' },
-        backupCodecPolicy: BackupCodecPolicy.PREFER_REGRESSION,
-        simulcast: false,
-        screenShareEncoding: {
-          maxBitrate: Math.round(preset.maxBitrate * frameRateBitrate),
-          maxFramerate: settings.frameRate,
-        },
-        scalabilityMode: 'L3T3_KEY',
-        // Preserve the captured pixel dimensions under congestion; the scalable
-        // stream can shed temporal layers before text/detail is downscaled.
-        degradationPreference: 'maintain-resolution',
-      })
-      if (audioTrack) {
-        await liveKitRoom.localParticipant.publishTrack(audioTrack, { source: Track.Source.ScreenShareAudio })
-      }
+      const { videoTrack, audioTrack } = await publishScreenTracks(liveKitRoom, pendingScreenTracks, settings)
       setScreenTrack(videoTrack)
-      setScreenAudioTrack(audioTrack ?? null)
+      setScreenAudioTrack(audioTrack)
       setScreenSharing(true)
       setMode('screen')
       videoTrack.mediaStreamTrack.addEventListener('ended', stopScreenShare, { once: true })
@@ -626,19 +566,13 @@ function App() {
   function updateScreenShareSettings(update: Partial<ScreenShareSettings>) {
     const next = { ...screenShareSettings, ...update }
     setScreenShareSettings(next)
-    localStorage.setItem(SCREEN_SETTINGS_KEY, JSON.stringify(next))
+    localStorage.setItem('lumaloop.screenShareSettings', JSON.stringify(next))
   }
 
   function stopScreenShare() {
     exitScreenFullscreen()
     const liveKitRoom = liveKitRef.current
-    if (liveKitRoom) {
-      for (const publication of liveKitRoom.localParticipant.trackPublications.values()) {
-        if (publication.source === 'screen_share' && publication.track) {
-          void liveKitRoom.localParticipant.unpublishTrack(publication.track, true)
-        }
-      }
-    }
+    if (liveKitRoom) stopPublishedScreenShare(liveKitRoom)
     socketRef.current?.emit('screen:active', { code: room?.code, participantId: session?.participantId, active: false })
     setScreenSharing(false)
     setScreenTrack(null)
