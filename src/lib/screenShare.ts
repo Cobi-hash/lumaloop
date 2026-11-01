@@ -95,13 +95,14 @@ export async function publishScreenCapture(
   const publishedTracks: typeof tracks = []
   videoTrack.mediaStreamTrack.contentHint = settings.contentProfile === 'detail' ? 'detail' : 'motion'
 
-  // Movies normally run at 24/30 fps. Use one VP9 SVC stream to provide
-  // temporal and spatial adaptation without uploading several simulcast encodes.
+  // Prefer H.264 for this controlled performance experiment. Chromium on many
+  // Windows devices can use hardware H.264 encoding/decoding; VP8 remains the
+  // compatibility fallback for clients that cannot receive H.264.
   const frameRateFactor = settings.frameRate === 60 ? 1.35 : 1
   try {
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.ScreenShare,
-      videoCodec: 'vp9',
+      videoCodec: 'h264',
       backupCodec: { codec: 'vp8' },
       backupCodecPolicy: BackupCodecPolicy.PREFER_REGRESSION,
       simulcast: false,
@@ -109,7 +110,6 @@ export async function publishScreenCapture(
         maxBitrate: Math.round(preset.maxBitrate * frameRateFactor),
         maxFramerate: settings.frameRate,
       },
-      scalabilityMode: 'L3T3_KEY',
       // Balanced degradation avoids forcing either extreme: preserve readable
       // detail while reducing frame rate/resolution gradually under congestion.
       degradationPreference: 'balanced',
