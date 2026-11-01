@@ -766,14 +766,14 @@ function App() {
                   {screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenActive && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Choose what to share</button>}
                 </div>
               </div>
-              {screenTrack && <details className="screen-diagnostics">
-                <summary>Stream diagnostics · {screenTrack.isLocal ? 'sender' : 'receiver'}</summary>
-                <p>Live WebRTC statistics, refreshed every 2 seconds. Reproduce the stutter while this panel is open.</p>
-                <pre>{screenDiagnostics.length ? JSON.stringify(screenDiagnostics, null, 2) : 'Collecting WebRTC statistics…'}</pre>
-              </details>}
               {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
               {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
             </div>
+            <details className="screen-diagnostics">
+              <summary>Stream diagnostics{screenTrack ? ` · ${screenTrack.isLocal ? 'sender' : 'receiver'}` : ''}</summary>
+              <p>Live WebRTC statistics, refreshed every 2 seconds. Reproduce the stutter while this panel is open.</p>
+              <pre>{screenTrack ? screenDiagnostics.length ? JSON.stringify(screenDiagnostics, null, 2) : 'Collecting WebRTC statistics…' : 'Waiting for an active screen-share video track…'}</pre>
+            </details>
             {canControl && mediaControlsVisible && <div className="screen-settings-strip" aria-label="Screen-share settings">
               <label className="screen-setting">
                 <span>QUALITY</span>
