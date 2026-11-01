@@ -116,6 +116,36 @@ function readableTime(seconds: number) {
   return `${Math.floor(value / 60).toString().padStart(2, '0')}:${(value % 60).toString().padStart(2, '0')}`
 }
 
+type BandwidthEstimate = { low: number; high: number; uploadNeeded: number }
+
+function estimateScreenShareBandwidth(settings: ScreenShareSettings): BandwidthEstimate {
+  const ranges = {
+    auto: { low: 2.4, high: 4.5 },
+    '480p': { low: 0.55, high: 1.0 },
+    '720p': { low: 1.2, high: 2.5 },
+    '1080p': { low: 2.4, high: 4.5 },
+  } as const
+  const range = ranges[settings.quality]
+  const fpsFactor = settings.frameRate === 60 ? 1.35 : 1
+  const contentFactor = settings.contentProfile === 'detail' ? 0.9 : settings.contentProfile === 'motion' ? 1.08 : 1
+  const audioMbps = settings.shareAudio ? 0.12 : 0
+  const overheadFactor = 1.1
+  const low = (range.low * fpsFactor * contentFactor + audioMbps) * overheadFactor
+  const high = (range.high * fpsFactor * contentFactor + audioMbps) * overheadFactor
+  return { low, high, uploadNeeded: high / 0.7 }
+}
+
+function recommendScreenSettings(uploadMbps: number): { quality: ScreenQuality; frameRate: ScreenFrameRate; contentProfile: ScreenContentProfile; label: string } {
+  if (uploadMbps < 2) return { quality: '480p', frameRate: 30, contentProfile: 'motion', label: 'Low bandwidth · prioritize reliability' }
+  if (uploadMbps < 4) return { quality: '720p', frameRate: 30, contentProfile: 'motion', label: 'Moderate upload · good everyday balance' }
+  if (uploadMbps < 7) return { quality: '1080p', frameRate: 30, contentProfile: 'motion', label: 'Strong upload · Full HD at 30 FPS' }
+  return { quality: '1080p', frameRate: 60, contentProfile: 'motion', label: 'Very strong upload · Full HD at 60 FPS' }
+}
+
+function formatMbps(value: number) {
+  return value < 1 ? value.toFixed(2) : value.toFixed(1)
+}
+
 function App() {
   const [displayName, setDisplayName] = useState(() => localStorage.getItem(NAME_KEY) ?? '')
   const [roomCode, setRoomCode] = useState(() => new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '')
@@ -135,6 +165,7 @@ function App() {
   const [screenSharing, setScreenSharing] = useState(false)
   const [screenActive, setScreenActive] = useState(false)
   const [screenShareSettings, setScreenShareSettings] = useState(readScreenShareSettings)
+  const [uploadSpeedMbps, setUploadSpeedMbps] = useState('10')
   const [mediaControlsVisible, setMediaControlsVisible] = useState(true)
   const [screenTrack, setScreenTrack] = useState<LiveKitTrackType | null>(null)
   const [screenAudioTrack, setScreenAudioTrack] = useState<LiveKitTrackType | null>(null)
@@ -702,6 +733,35 @@ function App() {
                 <input type="checkbox" checked={screenShareSettings.shareAudio} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ shareAudio: event.target.checked })} />
                 <span>Share available audio</span>
               </label>
+              <section className="bandwidth-guide" aria-label="Upload bandwidth guide">
+                <div className="bandwidth-guide-heading">
+                  <div><span className="bandwidth-kicker">NETWORK PLANNER</span><h3>Choose settings for your upload</h3></div>
+                  <span className="bandwidth-live">ESTIMATES</span>
+                </div>
+                <label className="bandwidth-speed-input">
+                  <span>Your upload speed</span>
+                  <div><input type="number" min="0.1" max="10000" step="0.1" inputMode="decimal" value={uploadSpeedMbps} onChange={(event) => setUploadSpeedMbps(event.target.value)} aria-label="Upload speed in megabits per second" /><strong>Mbps</strong></div>
+                </label>
+                {(() => {
+                  const speed = Number(uploadSpeedMbps)
+                  const validSpeed = Number.isFinite(speed) && speed > 0
+                  const estimate = estimateScreenShareBandwidth(screenShareSettings)
+                  const recommendation = recommendScreenSettings(validSpeed ? speed : 0)
+                  const enough = validSpeed && speed >= estimate.uploadNeeded
+                  return <>
+                    <div className="bandwidth-current">
+                      <div><span>CURRENT SETTINGS · ESTIMATED USE</span><strong>{formatMbps(estimate.low)}–{formatMbps(estimate.high)} Mbps</strong><small>about {(estimate.low * 0.45).toFixed(1)}–{(estimate.high * 0.45).toFixed(1)} GB per hour</small></div>
+                      <div className={validSpeed ? enough ? 'bandwidth-status is-good' : 'bandwidth-status is-tight' : 'bandwidth-status'}>{validSpeed ? enough ? 'Good headroom' : 'May struggle' : 'Enter a valid speed'}</div>
+                    </div>
+                    <p className="bandwidth-explanation">{validSpeed ? <>For these settings, aim for at least <strong>{formatMbps(estimate.uploadNeeded)} Mbps upload</strong>. This includes roughly 30% headroom for network variation. {enough ? 'Your entered speed should have reasonable headroom.' : 'Your entered speed is below the recommended target; consider the settings below.'}</> : 'Enter your measured upload speed to see a recommendation.'}</p>
+                    <div className="bandwidth-recommendation">
+                      <div><span>RECOMMENDED FOR YOUR UPLOAD</span><strong>{recommendation.quality} · {recommendation.frameRate} FPS · Motion</strong><small>{recommendation.label}</small></div>
+                      <button type="button" disabled={!validSpeed || screenSharing} onClick={() => updateScreenShareSettings({ quality: recommendation.quality, frameRate: recommendation.frameRate, contentProfile: recommendation.contentProfile })}>Apply settings</button>
+                    </div>
+                    <p className="bandwidth-footnote">These are planning estimates, not fixed consumption. Actual bitrate changes with motion, browser encoder, codec, resolution and network conditions. Upload is sent once to the LiveKit server, not once per viewer. Measure upload with other uploads paused; use a wired connection when possible.</p>
+                  </>
+                })()}
+              </section>
               <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : '1080p is the maximum. The stream prioritizes keeping text sharp under congestion; on weak connections it may reduce frame rate rather than blur the image. 30 FPS is recommended; use 60 FPS for fast games if your upload can sustain it.'}</p>
             </div>}
             </div>
