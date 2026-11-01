@@ -503,8 +503,8 @@ function App() {
           active: false,
         })
       })
-      await liveKitRoom.connect(credentials.url, credentials.token)
       liveKitRef.current = liveKitRoom
+      await liveKitRoom.connect(credentials.url, credentials.token)
       setScreenConnected(true)
       for (const remote of liveKitRoom.remoteParticipants.values()) {
         for (const publication of remote.trackPublications.values()) {
