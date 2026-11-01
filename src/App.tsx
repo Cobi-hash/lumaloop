@@ -442,7 +442,7 @@ function App() {
         setRoom(nextRoom)
       })
       activeSocket.on('room:screen-state', (state: { active: boolean }) => { setScreenActive(state.active); if (state.active && screenTransport === 'p2p' && !canControl) p2pRef.current?.requestStream() })
-      activeSocket.on('p2p:mode', (state: { transport: ScreenTransport }) => setScreenTransport(state.transport))
+      activeSocket.on('p2p:mode', (state: { transport: ScreenTransport }) => { setScreenTransport(state.transport); liveKitRef.current?.disconnect(); liveKitRef.current = null; setScreenConnected(false); setScreenTrack(null); setScreenAudioTrack(null) })
       activeSocket.on('room:removed', () => {
         setRoom(null)
         setSession(null)
@@ -802,7 +802,7 @@ function App() {
           ) : (
             <div className="screen-experience" onPointerEnter={revealMediaControls} onPointerMove={revealMediaControls} onPointerDown={revealMediaControls} onPointerLeave={scheduleMediaControlsHide} onFocusCapture={revealMediaControls}>
             <div className="screen-stage" ref={screenStageRef}>
-              {(screenTrack || p2pStream) ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={screenAudioMuted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? canControl ? 'Open your video source in another tab, then choose it in the share picker. Enable Share tab audio if available.' : 'The host or co-host can start sharing at any time.' : 'Connect to the room screen, then choose a browser tab, window, or display to share.'}</p>{!screenConnected && <button className="secondary-button" type="button" onClick={() => void connectScreenShare(false)}><MonitorPlay size={16} /> Connect to screen</button>}</div>}
+              {(screenTrack || p2pStream) ? <><video ref={screenVideoRef} className="screen-video" autoPlay playsInline /><audio ref={screenAudioRef} autoPlay muted={screenAudioMuted} /></> : <div className="screen-empty"><div className="screen-empty-icon"><ScreenShare size={28} /></div><p className="eyebrow">LIVE SCREEN SHARE</p><h2>{screenConnected ? 'Waiting for a screen' : 'Bring everyone to the same screen.'}</h2><p>{screenConnected ? canControl ? 'Open your video source in another tab, then choose it in the share picker. Enable Share tab audio if available.' : 'The host or co-host can start sharing at any time.' : 'Connect to the room screen, then choose a browser tab, window, or display to share.'}</p>{(!screenConnected || (screenTransport === 'p2p' && !canControl && !p2pStream)) && <button className="secondary-button" type="button" onClick={() => { if (screenTransport === 'p2p') connectDirectScreenShare(); else void connectScreenShare(false) }}><MonitorPlay size={16} /> {screenTransport === 'p2p' ? 'Connect / retry direct stream' : 'Connect to screen'}</button>}</div>}
               <div className={`screen-stage-footer media-controls-overlay ${mediaControlsVisible ? 'controls-visible' : 'controls-hidden'}`} aria-hidden={!mediaControlsVisible}>
                 <span><span className={screenActive ? 'playing-pulse' : 'paused-mark'} />{screenActive ? 'Screen is live' : screenConnected ? 'Connected to screen room' : 'Not connected'}</span>
                 <div className="screen-footer-actions">
