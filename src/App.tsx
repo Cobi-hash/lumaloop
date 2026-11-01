@@ -557,7 +557,7 @@ function App() {
         selfBrowserSurface: 'exclude',
         surfaceSwitching: 'include',
         resolution: requestedScreenResolution(preset, settings.frameRate),
-        contentHint: preset.contentHint,
+        contentHint: 'motion',
         systemAudio: settings.shareAudio ? 'include' : 'exclude',
       })
       const liveKitRoom = liveKitRef.current
