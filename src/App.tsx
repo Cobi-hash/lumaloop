@@ -32,8 +32,8 @@ type Role = 'host' | 'cohost' | 'guest'
 type Mode = 'video' | 'screen'
 type ScreenTrackFactory = typeof import('livekit-client')['createLocalScreenTracks']
 type ScreenTracksPromise = ReturnType<ScreenTrackFactory>
-type ScreenQuality = 'smooth' | 'balanced' | 'sharp'
-type ScreenFrameRate = 15 | 30 | 60
+type ScreenQuality = 'auto' | '480p' | '720p' | '1080p' | '1440p'
+type ScreenFrameRate = 30 | 60
 
 interface ScreenShareSettings {
   quality: ScreenQuality
@@ -42,24 +42,23 @@ interface ScreenShareSettings {
 }
 
 const SCREEN_SETTINGS_KEY = 'lumaloop.screenShareSettings'
-const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'balanced', frameRate: 30, shareAudio: true }
+const DEFAULT_SCREEN_SETTINGS: ScreenShareSettings = { quality: 'auto', frameRate: 30, shareAudio: true }
 const SCREEN_QUALITY_PRESETS = {
-  smooth: { label: 'Smooth motion · 1080p', width: 1920, height: 1080, maxBitrate: 6_000_000, contentHint: 'motion', degradationPreference: 'maintain-framerate' },
-  balanced: { label: 'Balanced · 1080p', width: 1920, height: 1080, maxBitrate: 8_000_000, contentHint: 'detail', degradationPreference: 'balanced' },
-  sharp: { label: 'Original detail · up to 4K', width: 3840, height: 2160, maxBitrate: 14_000_000, contentHint: 'text', degradationPreference: 'maintain-resolution' },
+  auto: { label: 'Auto · up to 1440p', width: 2560, height: 1440, maxBitrate: 6_000_000 },
+  '480p': { label: '480p · low bandwidth', width: 854, height: 480, maxBitrate: 900_000 },
+  '720p': { label: '720p · balanced', width: 1280, height: 720, maxBitrate: 2_000_000 },
+  '1080p': { label: '1080p · Full HD', width: 1920, height: 1080, maxBitrate: 3_800_000 },
+  '1440p': { label: '1440p · 2K detail', width: 2560, height: 1440, maxBitrate: 6_000_000 },
 } as const
 
 function requestedScreenResolution(preset: typeof SCREEN_QUALITY_PRESETS[ScreenQuality], frameRate: ScreenFrameRate) {
-  if (preset.width !== 3840 || preset.height !== 2160) {
-    return { width: preset.width, height: preset.height, frameRate }
-  }
   const scaleFactor = window.devicePixelRatio || 1
-  const sourceWidth = (window.screen.width || 1920) * scaleFactor
-  const sourceHeight = (window.screen.height || 1080) * scaleFactor
-  const scale = Math.min(1, 3840 / sourceWidth, 2160 / sourceHeight)
+  const sourceWidth = Math.max(1, (window.screen.width || 1920) * scaleFactor)
+  const sourceHeight = Math.max(1, (window.screen.height || 1080) * scaleFactor)
+  const scale = Math.min(1, preset.width / sourceWidth, preset.height / sourceHeight)
   return {
-    width: Math.round(sourceWidth * scale),
-    height: Math.round(sourceHeight * scale),
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
     frameRate,
   }
 }
@@ -68,8 +67,8 @@ function readScreenShareSettings(): ScreenShareSettings {
   try {
     const saved = JSON.parse(localStorage.getItem(SCREEN_SETTINGS_KEY) ?? 'null') as Partial<ScreenShareSettings> | null
     return {
-      quality: saved?.quality === 'balanced' || saved?.quality === 'sharp' ? saved.quality : 'smooth',
-      frameRate: saved?.frameRate === 15 || saved?.frameRate === 60 ? saved.frameRate : 30,
+      quality: saved?.quality === '480p' || saved?.quality === '720p' || saved?.quality === '1080p' || saved?.quality === '1440p' ? saved.quality : 'auto',
+      frameRate: saved?.frameRate === 60 ? 60 : 30,
       shareAudio: typeof saved?.shareAudio === 'boolean' ? saved.shareAudio : DEFAULT_SCREEN_SETTINGS.shareAudio,
     }
   } catch {
@@ -581,14 +580,22 @@ function App() {
       const audioTrack = tracks.find((track) => track.kind === Track.Kind.Audio)
       if (!videoTrack) throw new Error('Your browser did not provide a screen video track.')
       const preset = SCREEN_QUALITY_PRESETS[settings.quality]
-      videoTrack.mediaStreamTrack.contentHint = preset.contentHint
+      // VP9 SVC provides spatial + temporal layers in one stream. LiveKit can
+      // move receivers between layers as their bandwidth/rendering capacity changes.
+      // VP8 remains the compatibility fallback for browsers without VP9 support.
+      videoTrack.mediaStreamTrack.contentHint = 'motion'
+      const frameRateBitrate = settings.frameRate === 60 ? 1.5 : 1
       await liveKitRoom.localParticipant.publishTrack(videoTrack, {
         source: Track.Source.ScreenShare,
-        videoCodec: 'h264',
+        videoCodec: 'vp9',
         backupCodec: { codec: 'vp8' },
         backupCodecPolicy: BackupCodecPolicy.PREFER_REGRESSION,
-        screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: settings.frameRate },
-        degradationPreference: preset.degradationPreference,
+        screenShareEncoding: {
+          maxBitrate: Math.round(preset.maxBitrate * frameRateBitrate),
+          maxFramerate: settings.frameRate,
+        },
+        scalabilityMode: 'L3T3_KEY',
+        degradationPreference: 'maintain-framerate',
       })
       if (audioTrack) {
         await liveKitRoom.localParticipant.publishTrack(audioTrack, { source: Track.Source.ScreenShareAudio })
@@ -731,24 +738,25 @@ function App() {
               <label className="screen-setting">
                 <span>QUALITY</span>
                 <select value={screenShareSettings.quality} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ quality: event.target.value as ScreenQuality })}>
-                  <option value="smooth">Smooth motion · 1080p</option>
-                  <option value="balanced">Balanced · 1080p</option>
-                  <option value="sharp">Original detail · up to 4K</option>
+                  <option value="auto">Auto · up to 1440p</option>
+                  <option value="480p">480p · low bandwidth</option>
+                  <option value="720p">720p · balanced</option>
+                  <option value="1080p">1080p · Full HD</option>
+                  <option value="1440p">1440p · 2K detail</option>
                 </select>
               </label>
               <label className="screen-setting screen-fps-setting">
                 <span>FRAME RATE</span>
                 <select value={screenShareSettings.frameRate} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ frameRate: Number(event.target.value) as ScreenFrameRate })}>
-                  <option value="15">15 FPS</option>
-                  <option value="30">30 FPS</option>
-                  <option value="60">60 FPS (when supported)</option>
+                  <option value="30">30 FPS · recommended</option>
+                  <option value="60">60 FPS · smoother motion</option>
                 </select>
               </label>
               <label className="screen-audio-toggle">
                 <input type="checkbox" checked={screenShareSettings.shareAudio} disabled={screenSharing} onChange={(event) => updateScreenShareSettings({ shareAudio: event.target.checked })} />
                 <span>Share available audio</span>
               </label>
-              <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : 'Higher quality and frame rates use more bandwidth. Browser and network limits may reduce them.'}</p>
+              <p className="screen-settings-note">{screenSharing ? 'Stop sharing to change these settings; they apply the next time you share.' : 'Auto adapts receiver quality to network and device capacity. 60 FPS uses more bandwidth; 30 FPS is the best default for stability.'}</p>
             </div>}
             </div>
           )}
