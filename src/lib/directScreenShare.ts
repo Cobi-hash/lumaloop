@@ -15,6 +15,7 @@ export class DirectScreenShare {
     private readonly participantId: string,
     private readonly onRemoteStream: (stream: MediaStream | null) => void,
     private readonly onError: (message: string) => void,
+    private readonly onStopped: () => void,
   ) {
     socket.on('p2p:request', this.handleRequest)
     socket.on('p2p:signal', this.handleSignal)
@@ -29,7 +30,7 @@ export class DirectScreenShare {
     const video = this.stream.getVideoTracks()[0]
     if (!video) throw new Error('The browser did not provide a screen video track.')
     video.contentHint = 'motion'
-    video.addEventListener('ended', () => this.stop(), { once: true })
+    video.addEventListener('ended', () => { this.stop(); this.onStopped() }, { once: true })
   }
 
   requestStream() {
