@@ -106,18 +106,16 @@ export function createWatchPartyServer() {
       }
     })
 
-    // Experimental direct WebRTC signaling. Media never passes through this server.
+    // Experimental direct WebRTC signaling. Only signaling data is relayed; media is peer-to-peer.
     socket.on('p2p:signal', (payload: unknown) => {
       const input = (payload ?? {}) as { code?: unknown; participantId?: unknown; targetId?: unknown; signal?: unknown }
       if (typeof input.code !== 'string' || typeof input.participantId !== 'string' || typeof input.targetId !== 'string' || !input.signal) return
       if (!socketOwnsParticipant(input.code, input.participantId, socket.id)) return
-      if (!registry.canJoinScreen(input.code, input.participantId, String((registry.participant(input.code, input.participantId) as { authToken?: string } | undefined)?.authToken ?? ''))) return
+      const sender = registry.participant(input.code, input.participantId)
       const target = registry.participant(input.code, input.targetId)
-      if (!target?.connected || !target.socketId) return
-      // Only an authorized host/cohost may initiate offers; guests may return answers/ICE.
-      const senderCanPublish = registry.canPublishScreen(input.code, input.participantId)
-      const senderCanJoin = Boolean(registry.participant(input.code, input.participantId)?.connected)
-      if (!senderCanPublish && !senderCanJoin) return
+      if (!sender?.connected || !target?.connected || !target.socketId) return
+      const signal = input.signal as { type?: unknown }
+      if (signal.type === 'offer' && !registry.canPublishScreen(input.code, input.participantId)) return
       io.to(target.socketId).emit('p2p:signal', { from: input.participantId, signal: input.signal })
     })
 
