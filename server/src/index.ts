@@ -106,6 +106,32 @@ export function createWatchPartyServer() {
       }
     })
 
+    // Experimental direct WebRTC signaling. Media never passes through this server.
+    socket.on('p2p:signal', (payload: unknown) => {
+      const input = (payload ?? {}) as { code?: unknown; participantId?: unknown; targetId?: unknown; signal?: unknown }
+      if (typeof input.code !== 'string' || typeof input.participantId !== 'string' || typeof input.targetId !== 'string' || !input.signal) return
+      if (!socketOwnsParticipant(input.code, input.participantId, socket.id)) return
+      if (!registry.canJoinScreen(input.code, input.participantId, String((registry.participant(input.code, input.participantId) as { authToken?: string } | undefined)?.authToken ?? ''))) return
+      const target = registry.participant(input.code, input.targetId)
+      if (!target?.connected || !target.socketId) return
+      // Only an authorized host/cohost may initiate offers; guests may return answers/ICE.
+      const senderCanPublish = registry.canPublishScreen(input.code, input.participantId)
+      const senderCanJoin = Boolean(registry.participant(input.code, input.participantId)?.connected)
+      if (!senderCanPublish && !senderCanJoin) return
+      io.to(target.socketId).emit('p2p:signal', { from: input.participantId, signal: input.signal })
+    })
+
+    socket.on('p2p:request', (payload: unknown) => {
+      const input = (payload ?? {}) as { code?: unknown; participantId?: unknown }
+      if (typeof input.code !== 'string' || typeof input.participantId !== 'string') return
+      if (!socketOwnsParticipant(input.code, input.participantId, socket.id)) return
+      const guest = registry.participant(input.code, input.participantId)
+      if (!guest?.connected) return
+      const host = registry.snapshot(input.code).participants.find((participant) => participant.role === 'host' || participant.role === 'cohost')
+      const hostParticipant = host ? registry.participant(input.code, host.id) : undefined
+      if (hostParticipant?.socketId) io.to(hostParticipant.socketId).emit('p2p:request', { participantId: input.participantId })
+    })
+
     socket.on('room:playback', (payload: unknown, acknowledge?: (result: unknown) => void) => {
       try {
         const input = (payload ?? {}) as {
