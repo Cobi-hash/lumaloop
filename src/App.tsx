@@ -187,6 +187,7 @@ function App() {
   const [mode, setMode] = useState<Mode>('video')
   const [muted, setMuted] = useState(() => localStorage.getItem('lumaloop.muted') !== 'false')
   const [screenAudioMuted, setScreenAudioMuted] = useState(true)
+  const [screenDiagnostics, setScreenDiagnostics] = useState<Record<string, unknown>[]>([])
   const [mediaUrl, setMediaUrl] = useState('')
   const [mediaError, setMediaError] = useState('')
   const [screenError, setScreenError] = useState('')
@@ -319,6 +320,48 @@ function App() {
     screenTrack.attach(video)
     return () => { screenTrack.detach(video) }
   }, [screenTrack])
+
+  useEffect(() => {
+    if (!screenTrack || !screenConnected) {
+      setScreenDiagnostics([])
+      return
+    }
+    let disposed = false
+    let collecting = false
+    const collect = async () => {
+      if (collecting) return
+      collecting = true
+      try {
+        const report = await screenTrack.getRTCStatsReport()
+        if (!report || disposed) return
+        const fields = [
+          'type', 'kind', 'mediaType', 'codecId', 'mimeType',
+          'bytesSent', 'bytesReceived', 'packetsSent', 'packetsReceived', 'packetsLost',
+          'framesEncoded', 'framesSent', 'framesPerSecond',
+          'framesDecoded', 'framesReceived', 'framesDropped',
+          'frameWidth', 'frameHeight', 'jitter', 'roundTripTime',
+          'qualityLimitationReason', 'encoderImplementation', 'decoderImplementation',
+          'currentRoundTripTime', 'availableOutgoingBitrate', 'availableIncomingBitrate',
+        ]
+        const rows = Array.from(report.values())
+          .filter((stat) => ['outbound-rtp', 'inbound-rtp', 'remote-inbound-rtp', 'candidate-pair'].includes(stat.type))
+          .map((stat) => Object.fromEntries(fields
+            .filter((field) => field in stat)
+            .map((field) => [field, (stat as unknown as Record<string, unknown>)[field]])))
+        if (!disposed) setScreenDiagnostics(rows)
+      } catch {
+        if (!disposed) setScreenDiagnostics([{ status: 'Statistics are not available from this browser yet.' }])
+      } finally {
+        collecting = false
+      }
+    }
+    void collect()
+    const timer = window.setInterval(() => void collect(), 2_000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [screenTrack, screenConnected])
 
   useEffect(() => {
     const audio = screenAudioRef.current
@@ -723,6 +766,11 @@ function App() {
                   {screenSharing ? <button className="stop-share" type="button" onClick={stopScreenShare}><X size={15} /> Stop sharing</button> : canControl && !screenActive && <button className="share-button" type="button" onClick={startScreenShare}><ScreenShare size={16} /> Choose what to share</button>}
                 </div>
               </div>
+              {screenTrack && <details className="screen-diagnostics">
+                <summary>Stream diagnostics · {screenTrack.isLocal ? 'sender' : 'receiver'}</summary>
+                <p>Live WebRTC statistics, refreshed every 2 seconds. Reproduce the stutter while this panel is open.</p>
+                <pre>{screenDiagnostics.length ? JSON.stringify(screenDiagnostics, null, 2) : 'Collecting WebRTC statistics…'}</pre>
+              </details>}
               {screenError && <p className="inline-error screen-error" role="alert">{screenError}</p>}
               {!canControl && !screenTrack && <p className="screen-limit-note"><Mic2 size={14} /> Screen audio is shared when supported by your browser.</p>}
             </div>
