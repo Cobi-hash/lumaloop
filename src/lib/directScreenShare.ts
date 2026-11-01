@@ -54,6 +54,7 @@ export class DirectScreenShare {
     }
     peer.ontrack = (event) => {
       const stream = event.streams[0] ?? new MediaStream([event.track])
+      event.track.addEventListener('ended', () => this.onRemoteStream(null), { once: true })
       this.onRemoteStream(stream)
     }
     return peer
