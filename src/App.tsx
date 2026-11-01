@@ -441,7 +441,7 @@ function App() {
         }
         setRoom(nextRoom)
       })
-      activeSocket.on('room:screen-state', (state: { active: boolean }) => setScreenActive(state.active))
+      activeSocket.on('room:screen-state', (state: { active: boolean }) => { setScreenActive(state.active); if (state.active && screenTransport === 'p2p' && !canControl) p2pRef.current?.requestStream() })
       activeSocket.on('p2p:mode', (state: { transport: ScreenTransport }) => setScreenTransport(state.transport))
       activeSocket.on('room:removed', () => {
         setRoom(null)
