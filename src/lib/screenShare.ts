@@ -30,7 +30,7 @@ const SCREEN_QUALITY_PRESETS = {
   auto: { width: 1920, height: 1080, maxBitrate: 4_500_000 },
   '480p': { width: 854, height: 480, maxBitrate: 1_000_000 },
   '720p': { width: 1280, height: 720, maxBitrate: 2_500_000 },
-  '1080p': { width: 1920, height: 1080, maxBitrate: 3_600_000 },
+  '1080p': { width: 1920, height: 1080, maxBitrate: 4_500_000 },
 } as const
 
 export function readScreenShareSettings(): ScreenShareSettings {
