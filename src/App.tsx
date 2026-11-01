@@ -574,7 +574,7 @@ function App() {
 
   function connectDirectScreenShare() {
     if (!room || !session || !socketRef.current || p2pRef.current) return
-    const direct = new DirectScreenShare(socketRef.current, room.code, session.participantId, setP2pStream, setScreenError)
+    const direct = new DirectScreenShare(socketRef.current, room.code, session.participantId, setP2pStream, setScreenError, () => { setScreenSharing(false); setScreenActive(false); setScreenConnected(false); socketRef.current?.emit('screen:active', { code: room.code, participantId: session.participantId, active: false }) })
     p2pRef.current = direct
     setScreenConnected(true)
     if (!canControl) direct.requestStream()
