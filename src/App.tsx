@@ -8,6 +8,7 @@ import {
   RoomEvent,
   stopPublishedScreenShare,
   Track,
+  type ScreenQuality,
   type ScreenShareSettings,
   type ScreenTracksPromise,
 } from './lib/screenShare'
@@ -507,8 +508,8 @@ function App() {
       setScreenConnected(true)
       for (const remote of liveKitRoom.remoteParticipants.values()) {
         for (const publication of remote.trackPublications.values()) {
-          if (publication.track?.kind === TrackKind.Kind.Video) setScreenTrack(publication.track)
-          if (publication.track?.kind === TrackKind.Kind.Audio) setScreenAudioTrack(publication.track)
+          if (publication.track?.kind === Track.Kind.Video) setScreenTrack(publication.track)
+          if (publication.track?.kind === Track.Kind.Audio) setScreenAudioTrack(publication.track)
         }
       }
       if (publish && pendingScreenTracks) await publishScreenCapture(liveKitRoom, pendingScreenTracks, settings)
