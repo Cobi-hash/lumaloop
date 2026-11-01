@@ -653,3 +653,95 @@
 .room-shell .cohost-tag { font-size: 11px; }
 .room-shell .room-code-button span { font-size: 14px; }
 .room-shell .screen-settings-strip { row-gap: 13px; }
+
+
+/* Upload bandwidth planner */
+.room-shell .bandwidth-guide {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 13px;
+  margin-top: 3px;
+  padding: 16px;
+  border: 1px solid var(--line, rgba(255,255,255,.1));
+  border-radius: 14px;
+  background: rgba(255,255,255,.025);
+}
+.bandwidth-guide-heading,
+.bandwidth-current,
+.bandwidth-recommendation,
+.bandwidth-speed-input,
+.bandwidth-current > div:first-child,
+.bandwidth-recommendation > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bandwidth-guide-heading h3 {
+  margin: 4px 0 0;
+  color: var(--text, #f5f1eb);
+  font-size: 15px;
+  font-weight: 650;
+}
+.bandwidth-kicker,
+.bandwidth-current > div:first-child > span,
+.bandwidth-recommendation > div > span {
+  color: var(--muted, #9b9691);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .11em;
+}
+.bandwidth-live {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #82d9c0;
+  background: rgba(80,190,155,.1);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.bandwidth-speed-input { justify-content: flex-start; color: var(--muted, #aaa); font-size: 12px; }
+.bandwidth-speed-input > div { display: flex; align-items: center; gap: 7px; }
+.bandwidth-speed-input input {
+  width: 88px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--line, rgba(255,255,255,.14));
+  border-radius: 8px;
+  color: var(--text, #fff);
+  background: rgba(0,0,0,.18);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.bandwidth-speed-input strong { color: var(--text, #fff); font-size: 12px; }
+.bandwidth-current { align-items: flex-start; padding: 12px; border-radius: 10px; background: rgba(0,0,0,.16); }
+.bandwidth-current > div:first-child { align-items: flex-start; flex-direction: column; gap: 4px; }
+.bandwidth-current strong { color: var(--text, #fff); font-size: 20px; font-variant-numeric: tabular-nums; }
+.bandwidth-current small,
+.bandwidth-recommendation small { color: var(--muted, #aaa); font-size: 11px; }
+.bandwidth-status { flex-shrink: 0; color: var(--muted, #aaa); font-size: 11px; }
+.bandwidth-status.is-good { color: #77d4b5; }
+.bandwidth-status.is-tight { color: #e8b66d; }
+.bandwidth-explanation,
+.bandwidth-footnote { margin: 0; color: var(--muted, #aaa); font-size: 11px; line-height: 1.55; }
+.bandwidth-explanation strong { color: var(--text, #fff); }
+.bandwidth-recommendation { align-items: center; padding: 12px; border: 1px solid rgba(113,196,171,.2); border-radius: 10px; background: rgba(80,190,155,.055); }
+.bandwidth-recommendation > div { align-items: flex-start; flex-direction: column; gap: 4px; }
+.bandwidth-recommendation strong { color: var(--text, #fff); font-size: 13px; }
+.bandwidth-recommendation button {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 8px;
+  color: #10231d;
+  background: #8bd9bd;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bandwidth-recommendation button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 520px) {
+  .room-shell .bandwidth-current { flex-direction: column; }
+  .bandwidth-recommendation { align-items: flex-start; flex-direction: column; }
+}
